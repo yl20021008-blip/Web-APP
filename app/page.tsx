@@ -99,7 +99,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v2.0 Web App · Next.js + Supabase · 低饱和科研风学习端</p>
+          <p>v2.0.1 Web App · SSL Hotfix · Next.js + Supabase</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}

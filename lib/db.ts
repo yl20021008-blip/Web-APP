@@ -6,13 +6,45 @@ declare global {
 }
 
 function normalizeDatabaseUrl(url: string): string {
-  if (url.startsWith("postgresql+psycopg2://")) {
-    return "postgresql://" + url.slice("postgresql+psycopg2://".length);
+  let normalized = url.trim();
+
+  if (normalized.startsWith("postgresql+psycopg2://")) {
+    normalized = "postgresql://" + normalized.slice("postgresql+psycopg2://".length);
   }
-  if (url.startsWith("postgres+psycopg2://")) {
-    return "postgres://" + url.slice("postgres+psycopg2://".length);
+
+  if (normalized.startsWith("postgres+psycopg2://")) {
+    normalized = "postgres://" + normalized.slice("postgres+psycopg2://".length);
   }
-  return url;
+
+  /*
+   * v2.0.1 SSL hotfix:
+   *
+   * Supabase pooler URLs often include ?sslmode=require.
+   * In node-postgres, ssl-related query parameters can override the explicit
+   * ssl config object. On Vercel this may cause:
+   *
+   *   self-signed certificate in certificate chain
+   *
+   * We remove sslmode from the connection string and set ssl manually below.
+   */
+  try {
+    const parsed = new URL(normalized);
+    parsed.searchParams.delete("sslmode");
+    parsed.searchParams.delete("sslcert");
+    parsed.searchParams.delete("sslkey");
+    parsed.searchParams.delete("sslrootcert");
+    return parsed.toString();
+  } catch {
+    return normalized.replace(/[?&]sslmode=[^&]+/i, "");
+  }
+}
+
+function isLocalConnection(url: string): boolean {
+  return (
+    url.includes("localhost") ||
+    url.includes("127.0.0.1") ||
+    url.includes("::1")
+  );
 }
 
 export function getPool(): Pool {
@@ -23,14 +55,18 @@ export function getPool(): Pool {
 
   if (!global.__ieltsPgPool) {
     const connectionString = normalizeDatabaseUrl(raw);
-    const isLocal = connectionString.includes("localhost") || connectionString.includes("127.0.0.1");
+    const isLocal = isLocalConnection(connectionString);
 
     global.__ieltsPgPool = new Pool({
       connectionString,
       max: 3,
       idleTimeoutMillis: 20000,
       connectionTimeoutMillis: 15000,
-      ssl: isLocal ? undefined : { rejectUnauthorized: false }
+      ssl: isLocal
+        ? false
+        : {
+            rejectUnauthorized: false
+          }
     });
   }
 
