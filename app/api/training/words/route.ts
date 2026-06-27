@@ -39,7 +39,10 @@ export async function GET(request: Request) {
     const limit = Math.min(Number(url.searchParams.get("limit") || 30), 80);
 
     if (mode === "output") {
-      const rows = await query(
+      // v3.0.1 hotfix:
+      // Do not depend on learning_status.reviewed_at because older databases may not have this column.
+      // Prefer learned / reviewed words. If the learner has few learned words, fall back to new words.
+      const learned = await query(
         `
         SELECT ${WORD_COLUMNS}, 'output' AS task_type
         FROM learning_status ls
@@ -47,14 +50,34 @@ export async function GET(request: Request) {
         WHERE ls.user_id = $1
           AND ls.status <> 'new'
         ORDER BY
-          ls.reviewed_at DESC NULLS LAST,
-          ls.total_reviews DESC,
+          COALESCE(ls.total_reviews, 0) DESC,
+          COALESCE(ls.mastery_level, 0) ASC,
+          w.chapter ASC,
+          w.original_number ASC NULLS LAST,
           w.id ASC
         LIMIT $2
         `,
         [session.userId, limit]
       );
-      return ok(rows.rows);
+
+      if (learned.rows.length > 0) return ok(learned.rows);
+
+      const fresh = await query(
+        `
+        SELECT ${WORD_COLUMNS}, 'output' AS task_type
+        FROM learning_status ls
+        JOIN words w ON w.id = ls.word_id
+        WHERE ls.user_id = $1
+        ORDER BY
+          w.chapter ASC,
+          w.original_number ASC NULLS LAST,
+          w.id ASC
+        LIMIT $2
+        `,
+        [session.userId, limit]
+      );
+
+      return ok(fresh.rows);
     }
 
     if (mode === "weak") {
@@ -74,7 +97,8 @@ export async function GET(request: Request) {
         ORDER BY
           COALESCE(ls.difficult_flag, 0) DESC,
           (COALESCE(ls.wrong_count, 0) + COALESCE(ls.fuzzy_count, 0)) DESC,
-          ls.mastery_level ASC
+          ls.mastery_level ASC,
+          w.id ASC
         LIMIT $2
         `,
         [session.userId, limit]
@@ -88,10 +112,6 @@ export async function GET(request: Request) {
       FROM learning_status ls
       JOIN words w ON w.id = ls.word_id
       WHERE ls.user_id = $1
-        AND (
-          ls.status <> 'new'
-          OR ls.next_review_at IS NULL
-        )
       ORDER BY
         CASE
           WHEN ls.next_review_at IS NOT NULL AND ls.next_review_at <= NOW() THEN 0
@@ -109,7 +129,9 @@ export async function GET(request: Request) {
     );
 
     return ok(rows.rows);
-  } catch {
-    return fail("未登录", 401);
+  } catch (err) {
+    if (err instanceof Error && err.message === "UNAUTHORIZED") return fail("未登录", 401);
+    console.error("training words error:", err);
+    return fail(err instanceof Error ? `训练词读取失败：${err.message}` : "训练词读取失败", 500);
   }
 }

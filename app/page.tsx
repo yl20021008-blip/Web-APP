@@ -141,7 +141,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v3.0 雅思四技能词汇训练 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
+          <p>v3.0.1 雅思四技能词汇训练 · 口语热修 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -631,10 +631,10 @@ function TrainingMode({ mode, onMessage }: { mode: TrainMode; onMessage: (m: str
         <>
           <div className="output-task">
             <h3>30秒口语任务</h3>
-            <p>用下面 3–5 个词，口头说一段 30 秒回答：</p>
+            <p>用下面 3–5 个词，口头说一段 30 秒回答。现在这一版是“口语任务卡”，先不录音、不自动评分：</p>
             <div className="chips">{nearbyWords.map((w) => <span key={w.id}>{w.word}</span>)}</div>
             <p className="hidden-hint">题目：Describe a problem or change related to your study, city, environment, or daily life.</p>
-            <textarea value={writing} onChange={(e) => setWriting(e.target.value)} placeholder="可选：先写关键词或一句话草稿，也可以直接开口说。" />
+            <textarea value={writing} onChange={(e) => setWriting(e.target.value)} placeholder="可选：写关键词 / 句子草稿。真正训练时建议开口说 30 秒。" />
           </div>
           {revealed ? <div className="meaning"><strong>参考方向：</strong> Try to explain the cause, effect, and one possible solution. Use at least 3 target words naturally.</div> : null}
           <div className="button-row" style={{ justifyContent: "center" }}>
