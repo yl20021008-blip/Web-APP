@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type ApiResponse<T> = { ok: true; data: T } | { ok: false; error: string };
-type PageKey = "dashboard" | "flow" | "study" | "review" | "weak" | "summary" | "chapters" | "story" | "stats" | "wordbook" | "admin";
+type PageKey = "dashboard" | "flow" | "ielts" | "study" | "review" | "weak" | "summary" | "chapters" | "story" | "wordbook" | "admin";
+type TrainMode = "recognition" | "recall" | "listening" | "spelling" | "sentence" | "speaking";
 
 type Session = { userId: number; displayName: string };
 
@@ -33,7 +34,7 @@ type WordTask = {
   wrong_count?: number;
   fuzzy_count?: number;
   next_review_at: string | null;
-  task_type: "new" | "review";
+  task_type: "new" | "review" | "weak" | "training" | "output";
 };
 
 type AnswerResponse = {
@@ -57,6 +58,7 @@ type StudySessionStats = {
 const navItems: Array<[PageKey, string, string]> = [
   ["dashboard", "🏠", "首页"],
   ["flow", "⚡", "一键"],
+  ["ielts", "🎓", "雅思"],
   ["study", "🧠", "新词"],
   ["review", "🗓️", "复习"],
   ["weak", "🎯", "薄弱"],
@@ -88,6 +90,22 @@ function incToday(name: string, delta = 1) {
   const next = Number(localStorage.getItem(key) || 0) + delta;
   localStorage.setItem(key, String(next));
   return next;
+}
+
+function stripMeaning(text: string | null | undefined) {
+  return String(text || "暂无释义").replace(/\s+/g, " ").trim();
+}
+
+function normalizeWord(text: string) {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function maskWordInSentence(sentence: string | null, word: string) {
+  if (!sentence) return "This sentence uses ______ in an IELTS-style context.";
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(escaped, "ig");
+  const masked = sentence.replace(re, "______");
+  return masked === sentence ? sentence + "  →  ______" : masked;
 }
 
 export default function Home() {
@@ -123,7 +141,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v2.9 一键学习流 · 智能混合队列 · 错词回炉 · 每日总结</p>
+          <p>v3.0 雅思四技能词汇训练 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -138,13 +156,13 @@ export default function Home() {
         <>
           {active === "dashboard" && <Dashboard onMessage={setMessage} go={setActive} />}
           {active === "flow" && <Study mode="smart" onMessage={setMessage} />}
+          {active === "ielts" && <IELTSTraining onMessage={setMessage} />}
           {active === "study" && <Study mode="today" onMessage={setMessage} />}
           {active === "review" && <ReviewPlan />}
           {active === "weak" && <Study mode="weak" onMessage={setMessage} />}
           {active === "summary" && <DailySummary go={setActive} />}
           {active === "chapters" && <Chapters />}
           {active === "story" && <Stories onMessage={setMessage} />}
-          {active === "stats" && <Stats />}
           {active === "wordbook" && <Wordbook />}
           {active === "admin" && <AdminPanel />}
           <div style={{ marginTop: 18 }}>
@@ -247,9 +265,9 @@ function Dashboard({ onMessage, go }: { onMessage: (m: string) => void; go: (p: 
       </div>
 
       <div className="card hero-card">
-        <h2>一键开始今天的学习</h2>
+        <h2>今天的词汇学习路径</h2>
         <p style={{ color: "var(--muted)" }}>
-          系统会自动混合：到期复习、薄弱词、新词。忘记的词会在本组后面自动回炉。
+          先用“一键”完成复习和新词，再用“雅思”把词转化成听力、阅读、写作和口语能力。
         </p>
         <div className="button-row">
           {[10, 20, 30, 50].map((v) => <button key={v} className={goal === v ? "primary" : ""} onClick={() => saveGoal(v)}>{v} 个</button>)}
@@ -259,7 +277,8 @@ function Dashboard({ onMessage, go }: { onMessage: (m: string) => void; go: (p: 
           <div className="progress"><div style={{ width: `${progress}%` }} /></div>
         </div>
         <div className="button-row" style={{ marginTop: 18 }}>
-          <button className="primary big-cta" onClick={() => go("flow")}>⚡ 开始今天的学习</button>
+          <button className="primary big-cta" onClick={() => go("flow")}>⚡ 一键学习</button>
+          <button className="big-cta" onClick={() => go("ielts")}>🎓 雅思训练</button>
           <button onClick={() => go("summary")}>查看今日总结</button>
         </div>
       </div>
@@ -325,7 +344,6 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
   }
 
   function recycleForgotten(word: WordTask) {
-    // Wrong-word recycle: reinsert forgotten words later in the same queue.
     setQueue((q) => {
       const copy = [...q];
       const insertAt = Math.min(index + 5, copy.length);
@@ -360,12 +378,8 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
 
   async function goNext() {
     setSavedResult(null);
-    if (index + 1 >= queue.length) {
-      setPhase("complete");
-    } else {
-      setPhase("question");
-      setIndex(index + 1);
-    }
+    if (index + 1 >= queue.length) setPhase("complete");
+    else { setPhase("question"); setIndex(index + 1); }
   }
 
   if (error) return <div className="notice error">{error}</div>;
@@ -385,7 +399,6 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
         </div>
         <div className="button-row" style={{ marginTop: 18 }}>
           <button className="primary" onClick={load}>继续下一组</button>
-          <button onClick={() => window.location.reload()}>回到首页</button>
         </div>
       </section>
     );
@@ -413,27 +426,248 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
           <p className="srs-tip">智能流会自动混合复习、薄弱词和新词。忘记的词会在本组后面再次出现。</p>
         </>
       ) : (
-        <div className="answer-panel">
-          <div className="pos">{current.part_of_speech || " "}</div>
-          <div className="button-row audio-row">
-            {current.uk_audio_url ? <audio controls src={current.uk_audio_url} /> : <button onClick={() => speak(current.word, "en-GB")}>🔊 英式读音</button>}
-            {current.us_audio_url ? <audio controls src={current.us_audio_url} /> : <button onClick={() => speak(current.word, "en-US")}>🔊 美式读音</button>}
-          </div>
-          {(current.uk_phonetic || current.us_phonetic) ? <p style={{ color: "var(--muted)" }}>{current.uk_phonetic ? `英 ${current.uk_phonetic}` : ""}　{current.us_phonetic ? `美 ${current.us_phonetic}` : ""}</p> : null}
-          <div className="meaning">
-            <strong>{current.annotation || "暂无释义"}</strong>
-            <div className="example">
-              {current.example_sentence ? <p><strong>Example:</strong> {current.example_sentence}</p> : null}
-              {current.example_translation ? <p><strong>翻译：</strong>{current.example_translation}</p> : null}
-            </div>
-          </div>
-          {savedResult ? <div className="rating-saved">已记录：{savedResult.result} · 新等级 {savedResult.newLevel} · {savedResult.intervalLabel || "已安排复习"}</div> : null}
-          <div className="button-row" style={{ justifyContent: "center", marginTop: 22 }}>
-            <button className="primary" disabled={busy} onClick={goNext}>{index + 1 >= queue.length ? "查看本组反馈" : "下一词"}</button>
-          </div>
-        </div>
+        <AnswerPanel current={current} savedResult={savedResult} speak={speak} onNext={goNext} busy={busy} last={index + 1 >= queue.length} />
       )}
     </section>
+  );
+}
+
+function AnswerPanel({ current, savedResult, speak, onNext, busy, last }: {
+  current: WordTask;
+  savedResult: AnswerResponse | null;
+  speak: (word: string, lang: "en-GB" | "en-US") => void;
+  onNext: () => void;
+  busy: boolean;
+  last: boolean;
+}) {
+  return (
+    <div className="answer-panel">
+      <div className="pos">{current.part_of_speech || " "}</div>
+      <div className="button-row audio-row">
+        {current.uk_audio_url ? <audio controls src={current.uk_audio_url} /> : <button onClick={() => speak(current.word, "en-GB")}>🔊 英式读音</button>}
+        {current.us_audio_url ? <audio controls src={current.us_audio_url} /> : <button onClick={() => speak(current.word, "en-US")}>🔊 美式读音</button>}
+      </div>
+      {(current.uk_phonetic || current.us_phonetic) ? <p style={{ color: "var(--muted)" }}>{current.uk_phonetic ? `英 ${current.uk_phonetic}` : ""}　{current.us_phonetic ? `美 ${current.us_phonetic}` : ""}</p> : null}
+      <div className="meaning">
+        <strong>{current.annotation || "暂无释义"}</strong>
+        <div className="example">
+          {current.example_sentence ? <p><strong>Example:</strong> {current.example_sentence}</p> : null}
+          {current.example_translation ? <p><strong>翻译：</strong>{current.example_translation}</p> : null}
+        </div>
+      </div>
+      {savedResult ? <div className="rating-saved">已记录：{savedResult.result} · 新等级 {savedResult.newLevel} · {savedResult.intervalLabel || "已安排复习"}</div> : null}
+      <div className="button-row" style={{ justifyContent: "center", marginTop: 22 }}>
+        <button className="primary" disabled={busy} onClick={onNext}>{last ? "查看本组反馈" : "下一词"}</button>
+      </div>
+    </div>
+  );
+}
+
+function IELTSTraining({ onMessage }: { onMessage: (m: string) => void }) {
+  const [mode, setMode] = useState<TrainMode>("recall");
+
+  const cards: Array<{ key: TrainMode; title: string; desc: string; tag: string }> = [
+    { key: "recognition", title: "阅读识别", desc: "英文 → 中文，训练阅读中快速认词。", tag: "Reading" },
+    { key: "recall", title: "写作回忆", desc: "中文释义 → 英文，训练主动调用。", tag: "Writing" },
+    { key: "listening", title: "听音辨词", desc: "只听读音 → 猜单词，训练听力反应。", tag: "Listening" },
+    { key: "spelling", title: "拼写检查", desc: "中文/读音 → 输入英文，减少听力拼写丢分。", tag: "Listening" },
+    { key: "sentence", title: "例句填空", desc: "语境中填词，训练搭配和用法。", tag: "Reading/Writing" },
+    { key: "speaking", title: "口语30秒", desc: "用目标词做短口语输出。", tag: "Speaking" }
+  ];
+
+  return (
+    <section className="grid">
+      <div className="card">
+        <h2>雅思四技能词汇训练</h2>
+        <p style={{ color: "var(--muted)" }}>
+          目标不是只“认识单词”，而是做到：看得出、想得起、听得懂、拼得对、写得出、说得出。
+        </p>
+        <div className="training-grid">
+          {cards.map((c) => (
+            <button key={c.key} className={`training-card ${mode === c.key ? "active" : ""}`} onClick={() => setMode(c.key)}>
+              <span>{c.tag}</span>
+              <strong>{c.title}</strong>
+              <small>{c.desc}</small>
+            </button>
+          ))}
+        </div>
+      </div>
+      <TrainingMode mode={mode} onMessage={onMessage} />
+    </section>
+  );
+}
+
+function TrainingMode({ mode, onMessage }: { mode: TrainMode; onMessage: (m: string) => void }) {
+  const [queue, setQueue] = useState<WordTask[]>([]);
+  const [index, setIndex] = useState(0);
+  const [revealed, setRevealed] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [writing, setWriting] = useState("");
+  const [error, setError] = useState("");
+  const [sessionDone, setSessionDone] = useState(0);
+
+  const current = queue[index];
+
+  async function load() {
+    setError("");
+    setRevealed(false);
+    setTyped("");
+    setWriting("");
+    setIndex(0);
+    try {
+      const apiMode = mode === "sentence" || mode === "speaking" ? "output" : "mixed";
+      const data = await api<WordTask[]>(`/api/training/words?mode=${apiMode}&limit=24`);
+      setQueue(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取训练词失败");
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  function speak(word: string, lang: "en-GB" | "en-US" = "en-GB") {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const u = new SpeechSynthesisUtterance(word);
+    u.lang = lang;
+    u.rate = 0.82;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }
+
+  function next() {
+    setRevealed(false);
+    setTyped("");
+    setWriting("");
+    setSessionDone((v) => v + 1);
+    if (index + 1 >= queue.length) {
+      onMessage("本组雅思训练完成，正在刷新下一组。");
+      load();
+    } else {
+      setIndex(index + 1);
+    }
+  }
+
+  function checkSpelling() {
+    if (!current) return;
+    const ok = normalizeWord(typed) === normalizeWord(current.word);
+    setRevealed(true);
+    if (ok) onMessage("拼写正确。");
+    else onMessage(`拼写需要修正：${current.word}`);
+  }
+
+  function copyOutputTask() {
+    if (!current) return;
+    const text = `Use these words in 2 IELTS-style sentences: ${queue.slice(index, index + 5).map((w) => w.word).join(", ")}`;
+    navigator.clipboard?.writeText(text).catch(() => null);
+    onMessage("输出任务已复制。");
+  }
+
+  if (error) return <div className="notice error">{error}</div>;
+  if (!current) return <section className="card"><h2>雅思训练</h2><p>当前没有训练词，或者正在加载。</p><button onClick={load}>刷新</button></section>;
+
+  const titleMap: Record<TrainMode, string> = {
+    recognition: "阅读识别：英文 → 中文",
+    recall: "写作回忆：中文 → 英文",
+    listening: "听音辨词：读音 → 单词",
+    spelling: "拼写检查：中文/读音 → 英文拼写",
+    sentence: "例句填空：语境 → 单词",
+    speaking: "口语30秒：用词输出"
+  };
+
+  const nearbyWords = queue.slice(index, Math.min(index + 5, queue.length));
+
+  return (
+    <section className="card word-card">
+      <div className="recall-phase">🎓 {titleMap[mode]} · {index + 1} / {queue.length} · 本组完成 {sessionDone}</div>
+
+      {mode === "recognition" ? (
+        <>
+          <div className="word">{current.word}</div>
+          {!revealed ? <p className="hidden-hint">先回忆中文意思，再点显示答案。</p> : <TrainingAnswer current={current} speak={speak} />}
+        </>
+      ) : null}
+
+      {mode === "recall" ? (
+        <>
+          <div className="meaning prompt-meaning"><strong>{stripMeaning(current.annotation)}</strong></div>
+          {!revealed ? <p className="hidden-hint">看到中文后，先想英文单词。这个模式最接近写作主动调用。</p> : <div className="word">{current.word}</div>}
+          {revealed ? <TrainingAnswer current={current} speak={speak} compact /> : null}
+        </>
+      ) : null}
+
+      {mode === "listening" ? (
+        <>
+          <div className="listening-card">
+            <button className="primary big-cta" onClick={() => speak(current.word, "en-GB")}>🔊 播放英式读音</button>
+            <button onClick={() => speak(current.word, "en-US")}>🔊 播放美式读音</button>
+          </div>
+          {!revealed ? <p className="hidden-hint">先只听声音，猜英文单词和中文意思。</p> : <><div className="word">{current.word}</div><TrainingAnswer current={current} speak={speak} compact /></>}
+        </>
+      ) : null}
+
+      {mode === "spelling" ? (
+        <>
+          <div className="meaning prompt-meaning"><strong>{stripMeaning(current.annotation)}</strong></div>
+          <div className="button-row" style={{ justifyContent: "center" }}><button onClick={() => speak(current.word, "en-GB")}>🔊 听读音</button></div>
+          <div className="spelling-box">
+            <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="输入英文拼写" onKeyDown={(e) => { if (e.key === "Enter") checkSpelling(); }} />
+            <button className="primary" onClick={checkSpelling}>检查拼写</button>
+          </div>
+          {revealed ? <><div className={normalizeWord(typed) === normalizeWord(current.word) ? "notice success" : "notice error"}>{normalizeWord(typed) === normalizeWord(current.word) ? "拼写正确" : `正确拼写：${current.word}`}</div><TrainingAnswer current={current} speak={speak} compact /></> : null}
+        </>
+      ) : null}
+
+      {mode === "sentence" ? (
+        <>
+          <div className="sentence-blank">{maskWordInSentence(current.example_sentence, current.word)}</div>
+          {!revealed ? <p className="hidden-hint">根据语境想目标词。这个模式训练阅读、搭配和写作用法。</p> : <><div className="word">{current.word}</div><TrainingAnswer current={current} speak={speak} compact /></>}
+        </>
+      ) : null}
+
+      {mode === "speaking" ? (
+        <>
+          <div className="output-task">
+            <h3>30秒口语任务</h3>
+            <p>用下面 3–5 个词，口头说一段 30 秒回答：</p>
+            <div className="chips">{nearbyWords.map((w) => <span key={w.id}>{w.word}</span>)}</div>
+            <p className="hidden-hint">题目：Describe a problem or change related to your study, city, environment, or daily life.</p>
+            <textarea value={writing} onChange={(e) => setWriting(e.target.value)} placeholder="可选：先写关键词或一句话草稿，也可以直接开口说。" />
+          </div>
+          {revealed ? <div className="meaning"><strong>参考方向：</strong> Try to explain the cause, effect, and one possible solution. Use at least 3 target words naturally.</div> : null}
+          <div className="button-row" style={{ justifyContent: "center" }}>
+            <button onClick={copyOutputTask}>复制任务</button>
+          </div>
+        </>
+      ) : null}
+
+      <div className="button-row" style={{ justifyContent: "center", marginTop: 24 }}>
+        {!revealed ? <button className="primary" onClick={() => setRevealed(true)}>显示答案 / 参考</button> : null}
+        <button onClick={next}>{index + 1 >= queue.length ? "完成并刷新" : "下一题"}</button>
+      </div>
+    </section>
+  );
+}
+
+function TrainingAnswer({ current, speak, compact = false }: { current: WordTask; speak: (word: string, lang?: "en-GB" | "en-US") => void; compact?: boolean }) {
+  return (
+    <div className={compact ? "training-answer compact" : "training-answer"}>
+      <div className="button-row audio-row">
+        <button onClick={() => speak(current.word, "en-GB")}>🔊 英式</button>
+        <button onClick={() => speak(current.word, "en-US")}>🔊 美式</button>
+      </div>
+      {(current.uk_phonetic || current.us_phonetic) ? <p style={{ color: "var(--muted)" }}>{current.uk_phonetic ? `英 ${current.uk_phonetic}` : ""}　{current.us_phonetic ? `美 ${current.us_phonetic}` : ""}</p> : null}
+      <div className="meaning">
+        <strong>{current.annotation || "暂无释义"}</strong>
+        <div className="example">
+          {current.example_sentence ? <p><strong>Example:</strong> {current.example_sentence}</p> : null}
+          {current.example_translation ? <p><strong>翻译：</strong>{current.example_translation}</p> : null}
+          {current.chapter ? <p><strong>Chapter:</strong> {current.chapter}</p> : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -454,7 +688,7 @@ function DailySummary({ go }: { go: (p: PageKey) => void }) {
     <section className="grid">
       <div className="card">
         <h2>今日学习总结</h2>
-        <p style={{ color: "var(--muted)" }}>本地统计 + 数据库复习计划汇总。建议每天结束前看一次。</p>
+        <p style={{ color: "var(--muted)" }}>每天结束前看一次：明天要复习什么，哪些词还需要输出训练。</p>
         <div className="grid metrics">
           <div className="metric"><div className="label">今日完成</div><div className="value">{answered}</div></div>
           <div className="metric"><div className="label">正确率</div><div className="value">{accuracy}%</div></div>
@@ -463,7 +697,8 @@ function DailySummary({ go }: { go: (p: PageKey) => void }) {
           <div className="metric"><div className="label">明日复习</div><div className="value">{data?.tomorrow?.due_tomorrow ?? "—"}</div></div>
         </div>
         <div className="button-row" style={{ marginTop: 18 }}>
-          <button className="primary" onClick={() => go("story")}>生成今日故事</button>
+          <button className="primary" onClick={() => go("ielts")}>做雅思输出训练</button>
+          <button onClick={() => go("story")}>生成今日故事</button>
           <button onClick={() => go("weak")}>继续薄弱词</button>
         </div>
       </div>
@@ -476,7 +711,6 @@ function DailySummary({ go }: { go: (p: PageKey) => void }) {
   );
 }
 
-/* Reused sections from v2.8 */
 function ReviewPlan() {
   const [data, setData] = useState<{ upcoming: any[]; dueWords: any[] } | null>(null);
   useEffect(() => { api<{ upcoming: any[]; dueWords: any[] }>("/api/review/plan").then(setData).catch(() => setData({ upcoming: [], dueWords: [] })); }, []);
@@ -496,24 +730,6 @@ function Chapters() {
       <h2>章节进度</h2>
       <p style={{ color: "var(--muted)" }}>按章节查看学习路径，避免 3632 个词看起来太散。</p>
       <table className="table"><thead><tr><th>章节</th><th>进度</th><th>已学</th><th>掌握</th><th>到期</th></tr></thead><tbody>{rows.map((r) => <tr key={r.chapter}><td><strong>{r.chapter}</strong></td><td><div className="progress"><div style={{ width: `${r.learned_percent}%` }} /></div>{r.learned_percent}%</td><td>{r.learned}/{r.total}</td><td>{r.mastered}</td><td>{r.due}</td></tr>)}</tbody></table>
-    </section>
-  );
-}
-
-function Stats() {
-  const [data, setData] = useState<any | null>(null);
-  useEffect(() => { api<any>("/api/stats").then(setData).catch(() => setData(null)); }, []);
-  const totals = data?.totals || {};
-  return (
-    <section className="grid">
-      <div className="grid metrics">
-        <div className="metric"><div className="label">待学</div><div className="value">{totals.new_words ?? "—"}</div></div>
-        <div className="metric"><div className="label">已学</div><div className="value">{totals.learned_words ?? "—"}</div></div>
-        <div className="metric"><div className="label">已掌握</div><div className="value">{totals.mastered_words ?? "—"}</div></div>
-        <div className="metric"><div className="label">薄弱词</div><div className="value">{totals.difficult_words ?? "—"}</div></div>
-        <div className="metric"><div className="label">总复习</div><div className="value">{totals.total_reviews ?? "—"}</div></div>
-      </div>
-      <div className="card"><h2>薄弱词 Top 50</h2><table className="table"><thead><tr><th>单词</th><th>释义</th><th>错/模糊</th></tr></thead><tbody>{(data?.difficult || []).map((r: any, i: number) => <tr key={i}><td>{r.word}</td><td>{r.annotation}</td><td>{r.wrong_count}/{r.fuzzy_count}</td></tr>)}</tbody></table></div>
     </section>
   );
 }
