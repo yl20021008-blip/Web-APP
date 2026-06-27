@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type ApiResponse<T> = { ok: true; data: T } | { ok: false; error: string };
-type PageKey = "dashboard" | "study" | "review" | "weak" | "chapters" | "story" | "stats" | "wordbook" | "admin";
+type PageKey = "dashboard" | "flow" | "study" | "review" | "weak" | "summary" | "chapters" | "story" | "stats" | "wordbook" | "admin";
 
 type Session = { userId: number; displayName: string };
 
@@ -51,18 +51,19 @@ type StudySessionStats = {
   fuzzy: number;
   correct: number;
   mastered: number;
+  recycled: number;
 };
 
 const navItems: Array<[PageKey, string, string]> = [
   ["dashboard", "🏠", "首页"],
-  ["study", "🧠", "学习"],
+  ["flow", "⚡", "一键"],
+  ["study", "🧠", "新词"],
   ["review", "🗓️", "复习"],
   ["weak", "🎯", "薄弱"],
+  ["summary", "✅", "总结"],
   ["chapters", "📚", "章节"],
   ["story", "📖", "故事"],
-  ["stats", "📊", "统计"],
-  ["wordbook", "🔎", "词库"],
-  ["admin", "🛡️", "管理"]
+  ["wordbook", "🔎", "词库"]
 ];
 
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
@@ -80,6 +81,13 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
 
 function todayKey(name: string) {
   return `ielts_${name}_${new Date().toISOString().slice(0, 10)}`;
+}
+
+function incToday(name: string, delta = 1) {
+  const key = todayKey(name);
+  const next = Number(localStorage.getItem(key) || 0) + delta;
+  localStorage.setItem(key, String(next));
+  return next;
 }
 
 export default function Home() {
@@ -101,9 +109,7 @@ export default function Home() {
 
   useEffect(() => {
     refreshSession();
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => null);
-    }
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => null);
   }, []);
 
   async function logout() {
@@ -117,7 +123,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v2.8 All-in-one · Recall-first SRS · Goal · Weak Words · Chapters · PWA</p>
+          <p>v2.9 一键学习流 · 智能混合队列 · 错词回炉 · 每日总结</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -131,9 +137,11 @@ export default function Home() {
       ) : (
         <>
           {active === "dashboard" && <Dashboard onMessage={setMessage} go={setActive} />}
+          {active === "flow" && <Study mode="smart" onMessage={setMessage} />}
           {active === "study" && <Study mode="today" onMessage={setMessage} />}
           {active === "review" && <ReviewPlan />}
           {active === "weak" && <Study mode="weak" onMessage={setMessage} />}
+          {active === "summary" && <DailySummary go={setActive} />}
           {active === "chapters" && <Chapters />}
           {active === "story" && <Stories onMessage={setMessage} />}
           {active === "stats" && <Stats />}
@@ -141,6 +149,7 @@ export default function Home() {
           {active === "admin" && <AdminPanel />}
           <div style={{ marginTop: 18 }}>
             <button className="ghost" onClick={logout}>退出登录</button>
+            <button className="ghost" style={{ marginLeft: 8 }} onClick={() => setActive("admin")}>管理概览</button>
           </div>
         </>
       )}
@@ -195,7 +204,7 @@ function LoginBox({ onLogin }: { onLogin: (session: Session) => void }) {
 function Dashboard({ onMessage, go }: { onMessage: (m: string) => void; go: (p: PageKey) => void }) {
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [error, setError] = useState("");
-  const [goal, setGoal] = useState(20);
+  const [goal, setGoal] = useState(30);
 
   async function load() {
     try {
@@ -237,9 +246,11 @@ function Dashboard({ onMessage, go }: { onMessage: (m: string) => void; go: (p: 
         ))}
       </div>
 
-      <div className="card">
-        <h2>今日目标</h2>
-        <p style={{ color: "var(--muted)" }}>目标会保存在当前设备上。完成后会显示学习完成反馈。</p>
+      <div className="card hero-card">
+        <h2>一键开始今天的学习</h2>
+        <p style={{ color: "var(--muted)" }}>
+          系统会自动混合：到期复习、薄弱词、新词。忘记的词会在本组后面自动回炉。
+        </p>
         <div className="button-row">
           {[10, 20, 30, 50].map((v) => <button key={v} className={goal === v ? "primary" : ""} onClick={() => saveGoal(v)}>{v} 个</button>)}
         </div>
@@ -248,33 +259,33 @@ function Dashboard({ onMessage, go }: { onMessage: (m: string) => void; go: (p: 
           <div className="progress"><div style={{ width: `${progress}%` }} /></div>
         </div>
         <div className="button-row" style={{ marginTop: 18 }}>
-          <button className="primary" onClick={() => go("study")}>开始今日学习</button>
-          <button onClick={() => go("weak")}>练薄弱词</button>
-          <button onClick={() => go("chapters")}>看章节进度</button>
+          <button className="primary big-cta" onClick={() => go("flow")}>⚡ 开始今天的学习</button>
+          <button onClick={() => go("summary")}>查看今日总结</button>
         </div>
       </div>
     </section>
   );
 }
 
-function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "today" | "weak" }) {
+function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "today" | "weak" | "smart" }) {
   const [queue, setQueue] = useState<WordTask[]>([]);
   const [index, setIndex] = useState(0);
   const [phase, setPhase] = useState<"question" | "answer" | "complete">("question");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [savedResult, setSavedResult] = useState<AnswerResponse | null>(null);
-  const [stats, setStats] = useState<StudySessionStats>({ answered: 0, forgot: 0, fuzzy: 0, correct: 0, mastered: 0 });
+  const [stats, setStats] = useState<StudySessionStats>({ answered: 0, forgot: 0, fuzzy: 0, correct: 0, mastered: 0, recycled: 0 });
 
   async function load() {
     setError("");
     try {
-      const data = await api<WordTask[]>(`/api/study/today?mode=${mode}`);
+      const target = Number(localStorage.getItem(todayKey("daily_goal")) || 30);
+      const data = await api<WordTask[]>(`/api/study/today?mode=${mode}&target=${target}`);
       setQueue(data);
       setIndex(0);
       setPhase(data.length ? "question" : "complete");
       setSavedResult(null);
-      setStats({ answered: 0, forgot: 0, fuzzy: 0, correct: 0, mastered: 0 });
+      setStats({ answered: 0, forgot: 0, fuzzy: 0, correct: 0, mastered: 0, recycled: 0 });
     } catch (err) {
       setError(err instanceof Error ? err.message : "读取失败");
     }
@@ -297,14 +308,31 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
   }
 
   function updateLocalStats(result: string) {
-    localStorage.setItem(todayKey("answered"), String(Number(localStorage.getItem(todayKey("answered")) || 0) + 1));
+    incToday("answered", 1);
+    if (result === "忘记") incToday("forgot", 1);
+    if (result === "模糊") incToday("fuzzy", 1);
+    if (result === "正确") incToday("correct", 1);
+    if (result === "熟练") incToday("mastered", 1);
+
     setStats((s) => ({
       answered: s.answered + 1,
       forgot: s.forgot + (result === "忘记" ? 1 : 0),
       fuzzy: s.fuzzy + (result === "模糊" ? 1 : 0),
       correct: s.correct + (result === "正确" ? 1 : 0),
-      mastered: s.mastered + (result === "熟练" ? 1 : 0)
+      mastered: s.mastered + (result === "熟练" ? 1 : 0),
+      recycled: s.recycled
     }));
+  }
+
+  function recycleForgotten(word: WordTask) {
+    // Wrong-word recycle: reinsert forgotten words later in the same queue.
+    setQueue((q) => {
+      const copy = [...q];
+      const insertAt = Math.min(index + 5, copy.length);
+      copy.splice(insertAt, 0, { ...word, task_type: "review" });
+      return copy;
+    });
+    setStats((s) => ({ ...s, recycled: s.recycled + 1 }));
   }
 
   async function answer(result: string) {
@@ -319,6 +347,7 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
       });
 
       updateLocalStats(result);
+      if (result === "忘记") recycleForgotten(current);
       setSavedResult(saved);
       setPhase("answer");
       onMessage(`已记录：${result}。下次复习：${saved.intervalLabel || "已安排"}。`);
@@ -345,17 +374,18 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
     const accuracy = stats.answered ? Math.round(((stats.correct + stats.mastered) / stats.answered) * 100) : 0;
     return (
       <section className="card">
-        <h2>{mode === "weak" ? "薄弱词训练完成" : "本组学习完成"}</h2>
-        <p style={{ color: "var(--muted)" }}>这是本轮学习反馈。可以继续下一组，或切换到复习 / 章节进度。</p>
+        <h2>{mode === "smart" ? "今日学习流完成" : mode === "weak" ? "薄弱词训练完成" : "本组学习完成"}</h2>
+        <p style={{ color: "var(--muted)" }}>这是本轮学习反馈。忘记词已进行本组回炉。</p>
         <div className="grid metrics">
           <div className="metric"><div className="label">已完成</div><div className="value">{stats.answered}</div></div>
           <div className="metric"><div className="label">正确率</div><div className="value">{accuracy}%</div></div>
           <div className="metric"><div className="label">忘记</div><div className="value">{stats.forgot}</div></div>
           <div className="metric"><div className="label">模糊</div><div className="value">{stats.fuzzy}</div></div>
-          <div className="metric"><div className="label">熟练</div><div className="value">{stats.mastered}</div></div>
+          <div className="metric"><div className="label">回炉</div><div className="value">{stats.recycled}</div></div>
         </div>
         <div className="button-row" style={{ marginTop: 18 }}>
           <button className="primary" onClick={load}>继续下一组</button>
+          <button onClick={() => window.location.reload()}>回到首页</button>
         </div>
       </section>
     );
@@ -364,23 +394,23 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
   const isQuestion = phase === "question";
 
   return (
-    <section className="card word-card">
+    <section className="card word-card compact-study">
       <div className="recall-phase">{isQuestion ? "① 先回忆，不看答案" : "② 答案已显示，确认后进入下一词"}</div>
       <div className="notice" style={{ marginBottom: 18 }}>
-        {mode === "weak" ? "薄弱词专项" : current.task_type === "review" ? "到期复习" : "新词学习"} · {index + 1} / {queue.length} · 当前等级 {current.mastery_level}
+        {mode === "smart" ? "智能学习流" : mode === "weak" ? "薄弱词专项" : current.task_type === "review" ? "到期复习" : "新词学习"} · {index + 1} / {queue.length} · 当前等级 {current.mastery_level}
       </div>
       <div className="word">{current.word}</div>
 
       {isQuestion ? (
         <>
-          <p className="hidden-hint">先在心里回忆：这个词是什么意思？能不能造句？<br />然后选择真实记忆状态，系统会记录并显示答案。</p>
+          <p className="hidden-hint">先回忆中文意思和一个例句，再选择真实记忆状态。</p>
           <div className="recall-actions">
             <button className="forgot" disabled={busy} onClick={() => answer("忘记")}>完全忘记</button>
             <button className="fuzzy" disabled={busy} onClick={() => answer("模糊")}>有点模糊</button>
             <button className="correct" disabled={busy} onClick={() => answer("正确")}>基本记得</button>
             <button className="mastered" disabled={busy} onClick={() => answer("熟练")}>非常熟练</button>
           </div>
-          <p className="srs-tip">Recall-first SRS：先主动回忆，再显示答案，熟练度记录才更真实。</p>
+          <p className="srs-tip">智能流会自动混合复习、薄弱词和新词。忘记的词会在本组后面再次出现。</p>
         </>
       ) : (
         <div className="answer-panel">
@@ -407,8 +437,48 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
   );
 }
 
+function DailySummary({ go }: { go: (p: PageKey) => void }) {
+  const [data, setData] = useState<any | null>(null);
+  const answered = Number(localStorage.getItem(todayKey("answered")) || 0);
+  const forgot = Number(localStorage.getItem(todayKey("forgot")) || 0);
+  const fuzzy = Number(localStorage.getItem(todayKey("fuzzy")) || 0);
+  const correct = Number(localStorage.getItem(todayKey("correct")) || 0);
+  const mastered = Number(localStorage.getItem(todayKey("mastered")) || 0);
+  const accuracy = answered ? Math.round(((correct + mastered) / answered) * 100) : 0;
+
+  useEffect(() => {
+    api<any>("/api/daily/summary").then(setData).catch(() => setData(null));
+  }, []);
+
+  return (
+    <section className="grid">
+      <div className="card">
+        <h2>今日学习总结</h2>
+        <p style={{ color: "var(--muted)" }}>本地统计 + 数据库复习计划汇总。建议每天结束前看一次。</p>
+        <div className="grid metrics">
+          <div className="metric"><div className="label">今日完成</div><div className="value">{answered}</div></div>
+          <div className="metric"><div className="label">正确率</div><div className="value">{accuracy}%</div></div>
+          <div className="metric"><div className="label">忘记</div><div className="value">{forgot}</div></div>
+          <div className="metric"><div className="label">模糊</div><div className="value">{fuzzy}</div></div>
+          <div className="metric"><div className="label">明日复习</div><div className="value">{data?.tomorrow?.due_tomorrow ?? "—"}</div></div>
+        </div>
+        <div className="button-row" style={{ marginTop: 18 }}>
+          <button className="primary" onClick={() => go("story")}>生成今日故事</button>
+          <button onClick={() => go("weak")}>继续薄弱词</button>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>建议重点回看</h2>
+        <table className="table"><thead><tr><th>单词</th><th>释义</th><th>错/模糊</th></tr></thead><tbody>{(data?.weak || []).map((r: any, i: number) => <tr key={i}><td>{r.word}</td><td>{r.annotation}</td><td>{r.wrong_count}/{r.fuzzy_count}</td></tr>)}</tbody></table>
+      </div>
+    </section>
+  );
+}
+
+/* Reused sections from v2.8 */
 function ReviewPlan() {
-  const [data, setData] = useState<{ upcoming: Array<{ review_date: string; count: number }>; dueWords: Array<{ word: string; annotation: string; mastery_level: number }> } | null>(null);
+  const [data, setData] = useState<{ upcoming: any[]; dueWords: any[] } | null>(null);
   useEffect(() => { api<{ upcoming: any[]; dueWords: any[] }>("/api/review/plan").then(setData).catch(() => setData({ upcoming: [], dueWords: [] })); }, []);
   return (
     <section className="grid">
@@ -419,8 +489,8 @@ function ReviewPlan() {
 }
 
 function Chapters() {
-  const [rows, setRows] = useState<Array<{ chapter: string; total: number; learned: number; mastered: number; due: number; learned_percent: number }>>([]);
-  useEffect(() => { api<Array<{ chapter: string; total: number; learned: number; mastered: number; due: number; learned_percent: number }>>("/api/chapters/progress").then(setRows).catch(() => setRows([])); }, []);
+  const [rows, setRows] = useState<any[]>([]);
+  useEffect(() => { api<any[]>("/api/chapters/progress").then(setRows).catch(() => setRows([])); }, []);
   return (
     <section className="card">
       <h2>章节进度</h2>
@@ -510,7 +580,7 @@ function AdminPanel() {
   return (
     <section className="card">
       <h2>Web 管理概览</h2>
-      <p style={{ color: "var(--muted)" }}>v2.8 先提供 Web 管理概览。公共词库导入和重置仍建议用 Streamlit 后台，避免误删。</p>
+      <p style={{ color: "var(--muted)" }}>公共词库导入和重置仍建议用 Streamlit 后台，避免误删。</p>
       <div className="grid" style={{ gridTemplateColumns: "1fr auto", alignItems: "end" }}>
         <div className="form-row"><label>管理员 PIN</label><input value={pin} type="password" onChange={(e) => setPin(e.target.value)} /></div>
         <button className="primary" onClick={load}>查看概览</button>

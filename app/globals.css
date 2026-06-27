@@ -444,3 +444,33 @@ button.ghost {
     min-width: 62px;
   }
 }
+
+
+.hero-card {
+  background:
+    radial-gradient(circle at 0 0, rgba(221,230,225,0.95) 0, rgba(221,230,225,0) 38%),
+    rgba(251,250,246,0.92);
+}
+
+.big-cta {
+  font-size: 17px;
+  padding: 14px 20px;
+}
+
+.compact-study {
+  min-height: 520px;
+}
+
+@media (max-width: 820px) {
+  .bottom-nav {
+    grid-template-columns: repeat(5, 1fr);
+    overflow-x: auto;
+    justify-content: start;
+  }
+  .nav-btn {
+    min-width: 62px;
+  }
+  .metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
