@@ -1,23 +1,29 @@
-# IELTS Vocabulary Web App v2.0.1 SSL Hotfix
+# IELTS Vocabulary Web App v2.1 Recall-first SRS
 
-这是 v2.0.1 SSL 修复版。
+这是 v2.1 记忆逻辑升级版。
 
-## 修复的问题
+## 本版本修复的核心问题
 
-登录时报错：
+之前学习页会先显示中文释义、例句和读音，然后用户再点“忘记 / 模糊 / 正确 / 熟练”。
+
+这会导致：
 
 ```text
-self-signed certificate in certificate chain
+用户没有真正回忆
+评分不准确
+复习算法失真
 ```
 
-原因是 Vercel 的 Node.js 运行环境连接 Supabase PostgreSQL pooler 时，`DATABASE_URL` 里的 `sslmode=require` 可能覆盖代码里的 SSL 设置，导致证书链校验失败。
+v2.1 改成标准 SRS 逻辑：
 
-本版本在 `lib/db.ts` 中修复：
-
-- 自动把 `postgresql+psycopg2://` 转成 Node 可用的 `postgresql://`；
-- 自动移除 URL 里的 `sslmode=require`；
-- 手动设置 `ssl: { rejectUnauthorized: false }`；
-- 保持 Supabase 云端 SSL 连接可用。
+```text
+Step 1：只显示英文单词
+Step 2：用户先回忆
+Step 3：用户选择 完全忘记 / 有点模糊 / 基本记得 / 非常熟练
+Step 4：系统记录结果
+Step 5：显示答案、音标、读音、例句、翻译
+Step 6：点击下一词
+```
 
 ## 部署方式
 
@@ -27,16 +33,6 @@ self-signed certificate in certificate chain
 4. Push；
 5. Vercel 会自动重新部署。
 
-## Vercel 环境变量保持不变
+## 环境变量保持不变
 
-不用改环境变量，继续保留：
-
-```env
-DATABASE_URL=postgresql+psycopg2://...
-AUTH_SECRET=...
-PIN_PEPPER=ielts-vocabulary-app-v1.2
-ADMIN_PIN=...
-NODE_ENV=production
-```
-
-注意：`DATABASE_URL` 仍然可以保留 `?sslmode=require`，代码会自动处理。
+不用改 Vercel 环境变量。

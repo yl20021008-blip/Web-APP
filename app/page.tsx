@@ -33,6 +33,15 @@ type WordTask = {
   task_type: "new" | "review";
 };
 
+
+type AnswerResponse = {
+  wordId: number;
+  result: string;
+  newLevel: number;
+  status: string;
+  nextReviewAt: string;
+};
+
 type Story = {
   id: number;
   group_number: number;
@@ -99,7 +108,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v2.0.1 Web App · SSL Hotfix · Next.js + Supabase</p>
+          <p>v2.1 Web App · Recall-first SRS · Next.js + Supabase</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -238,12 +247,14 @@ function Dashboard({ onMessage }: { onMessage: (m: string) => void }) {
   );
 }
 
+
 function Study({ onMessage }: { onMessage: (m: string) => void }) {
   const [queue, setQueue] = useState<WordTask[]>([]);
   const [index, setIndex] = useState(0);
-  const [showAnswer, setShowAnswer] = useState(false);
+  const [phase, setPhase] = useState<"question" | "answer">("question");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [savedResult, setSavedResult] = useState<AnswerResponse | null>(null);
 
   async function load() {
     setError("");
@@ -251,7 +262,8 @@ function Study({ onMessage }: { onMessage: (m: string) => void }) {
       const data = await api<WordTask[]>("/api/study/today");
       setQueue(data);
       setIndex(0);
-      setShowAnswer(false);
+      setPhase("question");
+      setSavedResult(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "读取失败");
     }
@@ -273,24 +285,36 @@ function Study({ onMessage }: { onMessage: (m: string) => void }) {
   }
 
   async function answer(result: string) {
-    if (!current) return;
+    if (!current || busy || phase === "answer") return;
+
     setBusy(true);
+    setError("");
+
     try {
-      await api("/api/study/answer", {
+      const saved = await api<AnswerResponse>("/api/study/answer", {
         method: "POST",
         body: JSON.stringify({ wordId: current.id, result })
       });
-      setShowAnswer(false);
-      if (index + 1 >= queue.length) {
-        onMessage("本组学习完成，可以刷新获取下一组。");
-        await load();
-      } else {
-        setIndex(index + 1);
-      }
+
+      setSavedResult(saved);
+      setPhase("answer");
+      onMessage(`已记录：${result}。现在查看答案，再进入下一词。`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "提交失败");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function goNext() {
+    setPhase("question");
+    setSavedResult(null);
+
+    if (index + 1 >= queue.length) {
+      onMessage("本组学习完成，正在获取下一组。");
+      await load();
+    } else {
+      setIndex(index + 1);
     }
   }
 
@@ -306,46 +330,75 @@ function Study({ onMessage }: { onMessage: (m: string) => void }) {
     );
   }
 
+  const isQuestion = phase === "question";
+
   return (
     <section className="card word-card">
+      <div className="recall-phase">
+        {isQuestion ? "① 先回忆，不看答案" : "② 答案已显示，确认后进入下一词"}
+      </div>
+
       <div className="notice" style={{ marginBottom: 18 }}>
-        {current.task_type === "review" ? "到期复习" : "新词学习"} · {index + 1} / {queue.length} · 等级 {current.mastery_level}
+        {current.task_type === "review" ? "到期复习" : "新词学习"} · {index + 1} / {queue.length} · 当前等级 {current.mastery_level}
       </div>
 
       <div className="word">{current.word}</div>
-      <div className="pos">{current.part_of_speech || " "}</div>
 
-      <div className="button-row audio-row">
-        {current.uk_audio_url ? <audio controls src={current.uk_audio_url} /> : <button onClick={() => speak(current.word, "en-GB")}>🔊 英式读音</button>}
-        {current.us_audio_url ? <audio controls src={current.us_audio_url} /> : <button onClick={() => speak(current.word, "en-US")}>🔊 美式读音</button>}
-      </div>
+      {isQuestion ? (
+        <>
+          <p className="hidden-hint">
+            先在心里回忆：这个词是什么意思？能不能造句？<br />
+            然后选择你的真实记忆状态，系统会立即记录并显示答案。
+          </p>
 
-      {(current.uk_phonetic || current.us_phonetic) ? (
-        <p style={{ color: "var(--muted)" }}>
-          {current.uk_phonetic ? `英 ${current.uk_phonetic}` : ""}　
-          {current.us_phonetic ? `美 ${current.us_phonetic}` : ""}
-        </p>
-      ) : null}
+          <div className="recall-actions">
+            <button className="forgot" disabled={busy} onClick={() => answer("忘记")}>完全忘记</button>
+            <button className="fuzzy" disabled={busy} onClick={() => answer("模糊")}>有点模糊</button>
+            <button className="correct" disabled={busy} onClick={() => answer("正确")}>基本记得</button>
+            <button className="mastered" disabled={busy} onClick={() => answer("熟练")}>非常熟练</button>
+          </div>
 
-      {showAnswer ? (
-        <div className="meaning">
-          <strong>{current.annotation || "暂无释义"}</strong>
-          <div className="example">
-            {current.example_sentence ? <p><strong>Example:</strong> {current.example_sentence}</p> : null}
-            {current.example_translation ? <p><strong>翻译：</strong>{current.example_translation}</p> : null}
+          <p className="srs-tip">
+            Recall-first 模式：先主动回忆，再显示答案。这样记录的熟练度才更接近真实记忆。
+          </p>
+        </>
+      ) : (
+        <div className="answer-panel">
+          <div className="pos">{current.part_of_speech || " "}</div>
+
+          <div className="button-row audio-row">
+            {current.uk_audio_url ? <audio controls src={current.uk_audio_url} /> : <button onClick={() => speak(current.word, "en-GB")}>🔊 英式读音</button>}
+            {current.us_audio_url ? <audio controls src={current.us_audio_url} /> : <button onClick={() => speak(current.word, "en-US")}>🔊 美式读音</button>}
+          </div>
+
+          {(current.uk_phonetic || current.us_phonetic) ? (
+            <p style={{ color: "var(--muted)" }}>
+              {current.uk_phonetic ? `英 ${current.uk_phonetic}` : ""}　
+              {current.us_phonetic ? `美 ${current.us_phonetic}` : ""}
+            </p>
+          ) : null}
+
+          <div className="meaning">
+            <strong>{current.annotation || "暂无释义"}</strong>
+            <div className="example">
+              {current.example_sentence ? <p><strong>Example:</strong> {current.example_sentence}</p> : null}
+              {current.example_translation ? <p><strong>翻译：</strong>{current.example_translation}</p> : null}
+            </div>
+          </div>
+
+          {savedResult ? (
+            <div className="rating-saved">
+              已记录：{savedResult.result} · 新等级 {savedResult.newLevel}
+            </div>
+          ) : null}
+
+          <div className="button-row" style={{ justifyContent: "center", marginTop: 22 }}>
+            <button className="primary" disabled={busy} onClick={goNext}>
+              {index + 1 >= queue.length ? "完成本组 / 刷新下一组" : "下一词"}
+            </button>
           </div>
         </div>
-      ) : (
-        <p style={{ color: "var(--muted)" }}>先回忆中文释义，再点击显示答案。</p>
       )}
-
-      <div className="button-row" style={{ justifyContent: "center", marginTop: 22 }}>
-        <button onClick={() => setShowAnswer(!showAnswer)}>{showAnswer ? "隐藏答案" : "显示答案"}</button>
-        <button className="danger" disabled={busy} onClick={() => answer("忘记")}>忘记</button>
-        <button disabled={busy} onClick={() => answer("模糊")}>模糊</button>
-        <button className="primary" disabled={busy} onClick={() => answer("正确")}>正确</button>
-        <button className="primary" disabled={busy} onClick={() => answer("熟练")}>熟练</button>
-      </div>
     </section>
   );
 }
