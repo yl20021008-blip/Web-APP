@@ -90,7 +90,8 @@ export async function POST(request: Request) {
       result,
       newLevel: decision.newLevel,
       status: decision.status,
-      nextReviewAt: decision.nextReviewAt.toISOString()
+      nextReviewAt: decision.nextReviewAt.toISOString(),
+      intervalLabel: decision.intervalLabel
     });
   } catch (err) {
     return fail(err instanceof Error ? err.message : "提交失败", 400);

@@ -24,6 +24,10 @@ const WORD_COLUMNS = `
   ls.status,
   ls.mastery_level,
   ls.total_reviews,
+  ls.wrong_count,
+  ls.fuzzy_count,
+  ls.correct_count,
+  ls.difficult_flag,
   ls.next_review_at
 `;
 
@@ -31,8 +35,35 @@ export async function GET(request: Request) {
   try {
     const session = await requireSession();
     const url = new URL(request.url);
+    const mode = String(url.searchParams.get("mode") || "today");
     const newLimit = Math.min(Number(url.searchParams.get("newLimit") || 20), 50);
     const reviewLimit = Math.min(Number(url.searchParams.get("reviewLimit") || 120), 200);
+
+    if (mode === "weak") {
+      const weak = await query(
+        `
+        SELECT ${WORD_COLUMNS}, 'review' AS task_type
+        FROM learning_status ls
+        JOIN words w ON w.id = ls.word_id
+        WHERE ls.user_id = $1
+          AND ls.status <> 'new'
+          AND (
+            COALESCE(ls.difficult_flag, 0) = 1
+            OR COALESCE(ls.wrong_count, 0) > 0
+            OR COALESCE(ls.fuzzy_count, 0) > 0
+            OR ls.mastery_level <= 2
+          )
+        ORDER BY
+          COALESCE(ls.difficult_flag, 0) DESC,
+          (COALESCE(ls.wrong_count, 0) + COALESCE(ls.fuzzy_count, 0)) DESC,
+          ls.mastery_level ASC,
+          ls.next_review_at ASC NULLS LAST
+        LIMIT $2
+        `,
+        [session.userId, reviewLimit]
+      );
+      return ok(weak.rows);
+    }
 
     const due = await query(
       `

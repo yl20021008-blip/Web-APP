@@ -10,24 +10,50 @@ function cleanMeaning(text: string | null): string {
   return text.replace(/\s+/g, " ").slice(0, 28);
 }
 
+
 function buildStory(selected: Array<{ id: number; word: string; annotation: string | null }>) {
-  const linesEn = selected.map((w, i) => {
-    const connector = ["At first", "Soon after that", "During the discussion", "Near the end"][i % 4];
-    return `${connector}, I noticed **${w.word}**, a clue that helped me remember ${cleanMeaning(w.annotation)}.`;
-  });
-  const linesZh = selected.map((w, i) => {
-    const connector = ["一开始", "随后", "讨论过程中", "接近尾声时"][i % 4];
-    return `${connector}，我注意到 **${w.word}**，它帮助我记住“${cleanMeaning(w.annotation)}”。`;
-  });
+  const scenes = [
+    "At the entrance of a quiet research library",
+    "Beside a large map covered with field notes",
+    "During a short seminar with other students",
+    "In a laboratory where data were being checked",
+    "On the way back, while summarising the argument",
+    "At night, when the memory route became clear"
+  ];
+
+  const zhScenes = [
+    "在一座安静的研究图书馆入口",
+    "在一张写满田野笔记的大地图旁",
+    "在一次和同学的小型研讨中",
+    "在一间正在核对数据的实验室里",
+    "回程路上，当我整理论证时",
+    "夜晚，当整条记忆路线变清晰时"
+  ];
+
+  const grouped: Array<Array<{ id: number; word: string; annotation: string | null }>> = [];
+  for (let i = 0; i < selected.length; i += 6) grouped.push(selected.slice(i, i + 6));
+
+  const storyEn = grouped.map((group, idx) => {
+    const words = group.map((w) => `**${w.word}**`).join(", ");
+    return `${scenes[idx % scenes.length]}, I connected ${words} into one scene so that each term had a clear place in my memory.`;
+  }).join("\n\n");
+
+  const storyZh = grouped.map((group, idx) => {
+    const words = group.map((w) => `**${w.word}**（${cleanMeaning(w.annotation)}）`).join("、");
+    return `${zhScenes[idx % zhScenes.length]}，我把 ${words} 串成一个场景，让每个词都在记忆中有一个明确位置。`;
+  }).join("\n\n");
+
+  const quiz = selected.slice(0, 8).map((w, idx) => `${idx + 1}. ${w.word} → ${cleanMeaning(w.annotation)}`).join("\n");
 
   return {
-    titleEn: `A Memory Route with ${selected.length} Words`,
-    titleZh: `${selected.length}个词的记忆路线`,
-    storyEn: linesEn.join("\n"),
-    storyZh: linesZh.join("\n"),
-    memoryTip: "按故事顺序回忆单词，再回到中文释义检查。"
+    titleEn: `A Research Memory Route with ${selected.length} Words`,
+    titleZh: `${selected.length}个词的科研场景记忆路线`,
+    storyEn: `${storyEn}\n\nQuick self-test:\n${quiz}`,
+    storyZh: `${storyZh}\n\n快速自测：\n${quiz}`,
+    memoryTip: "先按场景顺序复述故事，再遮住中文释义回忆每个英文词。"
   };
 }
+
 
 export async function GET() {
   try {
