@@ -58,7 +58,7 @@ type StudySessionStats = {
 
 const navItems: Array<[PageKey, string, string]> = [
   ["dashboard", "🏠", "首页"],
-  ["flow", "⚡", "一键"],
+  ["flow", "⚡", "今日学习"],
   ["ielts", "🎓", "雅思"],
   ["study", "🧠", "新词"],
   ["review", "🗓️", "复习"],
@@ -148,7 +148,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v3.1.2 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
+          <p>v3.2.0 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -162,7 +162,7 @@ export default function Home() {
       ) : (
         <>
           {active === "dashboard" && <Dashboard onMessage={setMessage} go={setActive} />}
-          {active === "flow" && <Study mode="smart" onMessage={setMessage} />}
+          {active === "flow" && <LearningFlow onMessage={setMessage} go={setActive} />}
           {active === "ielts" && <IELTSTraining onMessage={setMessage} />}
           {active === "study" && <Study mode="today" onMessage={setMessage} />}
           {active === "review" && <ReviewPlan />}
@@ -293,7 +293,32 @@ function Dashboard({ onMessage, go }: { onMessage: (m: string) => void; go: (p: 
   );
 }
 
-function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "today" | "weak" | "smart" }) {
+function LearningFlow({ onMessage, go }: { onMessage: (m: string) => void; go: (page: PageKey) => void }) {
+  const [step,setStep] = useState(0);
+  const [words,setWords] = useState<WordTask[]>([]);
+  const [revealed,setRevealed] = useState(false);
+  const [draft,setDraft] = useState("");
+  const [responses,setResponses] = useState<Record<number,string>>({});
+  const labels = ["到期复习", "学习新词", "语境故事", "回忆与表达", "今日总结"];
+  function collected(next: WordTask[]) {
+    setWords(prev => [...new Map([...prev,...next].map(w => [w.id,w])).values()].slice(0,10));
+    setStep(s => s+1);
+  }
+  return <section>
+    <div className="card" style={{marginBottom:16}}><h2>今日学习</h2><p>复习5词 → 新学5词 → 阅读故事 → 回忆与表达。词汇回答会保存；流程位置和表达草稿仅保留在当前页面。</p><p role="status">{labels.map((label,i) => `${i === step ? "▶ " : i < step ? "✓ " : ""}${label}`).join(" / ")}</p></div>
+    {step === 0 && <Study key="flow-review" mode="review" onMessage={onMessage} onComplete={collected}/>}
+    {step === 1 && <Study key="flow-new" mode="new" onMessage={onMessage} onComplete={collected}/>}
+    {step === 2 && (words.length >= 5 ? <StoryPanel wordIds={words.map(w=>w.id)} onContinue={()=>setStep(3)}/> : <div className="card"><p>本轮不足5个目标词，先跳过故事生成。</p><button onClick={()=>setStep(3)}>继续回忆</button></div>)}
+    {step === 3 && <div className="card"><h2>不看答案，回忆这些词</h2><p>写出词义，再用其中3个词写两句英文。此处为自查练习，不自动评分，也不修改掌握等级。</p>
+      {words.map(w=><div className="form-row" key={w.id}><label>{w.word}</label><input value={responses[w.id] || ""} onChange={e=>setResponses({...responses,[w.id]:e.target.value})} placeholder="回忆中文意思"/>{revealed && <p>{w.annotation || "词库暂无释义"}</p>}</div>)}
+      <div className="form-row"><label>用词表达</label><textarea rows={4} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="用至少3个目标词写两句英文…"/></div>
+      <div className="button-row"><button onClick={()=>setRevealed(!revealed)}>{revealed ? "隐藏释义" : "查看释义并自查"}</button><button className="primary" onClick={()=>setStep(4)}>完成，查看总结</button></div></div>}
+    {step === 4 && <><DailySummary go={go}/><button style={{marginTop:16}} onClick={()=>{setStep(0);setWords([]);setResponses({});setDraft("");setRevealed(false);}}>开始下一轮</button></>}
+  </section>;
+}
+
+function Study({ onMessage, mode, onComplete }: { onMessage: (m: string) => void; mode: "today" | "weak" | "smart" | "review" | "new"; onComplete?: (words: WordTask[]) => void }) {
+  const [loadingTasks, setLoadingTasks] = useState(true);
   const [queue, setQueue] = useState<WordTask[]>([]);
   const [index, setIndex] = useState(0);
   const [phase, setPhase] = useState<"question" | "answer" | "complete">("question");
@@ -303,9 +328,10 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
   const [stats, setStats] = useState<StudySessionStats>({ answered: 0, forgot: 0, fuzzy: 0, correct: 0, mastered: 0, recycled: 0 });
 
   async function load() {
+    setLoadingTasks(true);
     setError("");
     try {
-      const target = Number(localStorage.getItem(todayKey("daily_goal")) || 30);
+      const target = onComplete ? 5 : Number(localStorage.getItem(todayKey("daily_goal")) || 30);
       const data = await api<WordTask[]>(`/api/study/today?mode=${mode}&target=${target}`);
       setQueue(data);
       setIndex(0);
@@ -314,7 +340,7 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
       setStats({ answered: 0, forgot: 0, fuzzy: 0, correct: 0, mastered: 0, recycled: 0 });
     } catch (err) {
       setError(err instanceof Error ? err.message : "读取失败");
-    }
+    } finally { setLoadingTasks(false); }
   }
 
   useEffect(() => {
@@ -391,6 +417,8 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
 
   if (error) return <div className="notice error">{error}</div>;
 
+  if (loadingTasks) return <p role="status">正在准备学习任务…</p>;
+
   if (phase === "complete" || !current) {
     const accuracy = stats.answered ? Math.round(((stats.correct + stats.mastered) / stats.answered) * 100) : 0;
     return (
@@ -406,6 +434,7 @@ function Study({ onMessage, mode }: { onMessage: (m: string) => void; mode: "tod
         </div>
         <div className="button-row" style={{ marginTop: 18 }}>
           <button className="primary" onClick={load}>继续下一组</button>
+          {onComplete && <button onClick={() => onComplete([...new Map(queue.map(w => [w.id,w])).values()])}>继续下一步</button>}
         </div>
       </section>
     );

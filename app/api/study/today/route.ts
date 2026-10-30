@@ -1,4 +1,4 @@
-import { ok, fail } from "@/app/api/_helpers";
+import { ok, fail, serviceFailure } from "@/app/api/_helpers";
 import { requireSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 
@@ -158,8 +158,10 @@ export async function GET(request: Request) {
       return ok(interleaveSmart(due.rows, weak.rows, fresh.rows, target));
     }
 
+    if (mode === "review") return ok(due.rows.slice(0, target));
+    if (mode === "new") return ok(fresh.rows.slice(0, target));
     return ok([...due.rows, ...fresh.rows]);
   } catch (err) {
-    return fail(err instanceof Error && err.message === "UNAUTHORIZED" ? "未登录" : "读取学习任务失败", 401);
+    return serviceFailure(err);
   }
 }

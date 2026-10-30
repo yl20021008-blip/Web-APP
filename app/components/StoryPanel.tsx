@@ -1,6 +1,7 @@
 "use client";
+import type { Source } from "@/lib/story-rag";
 import { useEffect, useRef, useState } from "react";
-type Story = { id: number; title_en: string; title_zh: string; story_en: string; story_zh: string; memory_tip: string; provider: string; model: string | null; created_at: string; word_count: number; target_words: string[] };
+type Story = { id: number; title_en: string; title_zh: string; story_en: string; story_zh: string; memory_tip: string; provider: string; model: string | null; created_at: string; word_count: number; references?: Source[]; target_words: string[] };
 async function request(options?: RequestInit) {
   const response = await fetch('/api/stories', { ...options, headers: { 'Content-Type': 'application/json' }, cache: 'no-store' });
   let body;
@@ -15,7 +16,7 @@ function StoryText({ text, words }: { text: string; words: string[] }) {
   const re = new RegExp(`(?<![a-zA-Z])(${escaped.join('|')})(?![a-zA-Z])`, 'gi');
   return <div className="story-text">{clean.split(re).map((part,i) => i % 2 ? <mark key={i}>{part}</mark> : part)}</div>;
 }
-export default function StoryPanel() {
+export default function StoryPanel({ wordIds, onContinue }: { wordIds?: number[]; onContinue?: () => void }) {
   const [stories,setStories] = useState<Story[]>([]);
   const [busy,setBusy] = useState(false);
   const [loading,setLoading] = useState(true);
@@ -29,7 +30,7 @@ export default function StoryPanel() {
   async function generate(storyId?: number) {
     setBusy(true); setError(''); setNotice('正在生成新故事，请稍候…');
     try {
-      const result = await request({ method:'POST', body:JSON.stringify({size:10, ...(storyId ? {storyId} : {})}) });
+      const result = await request({ method:'POST', body:JSON.stringify({size:10, ...(wordIds ? {wordIds} : {}), ...(storyId ? {storyId} : {})}) });
       setNotice('AI故事已生成并保存。'); setLatest(result.id); await load();
     } catch (e) { setError(e instanceof Error ? e.message : '生成失败'); setNotice(''); }
     finally { setBusy(false); }
@@ -39,6 +40,7 @@ export default function StoryPanel() {
       <button className="primary" disabled={busy} onClick={() => generate()}>{busy ? '正在生成，请稍候…' : '生成新的AI故事'}</button>
       {notice && <p role="status">{notice}</p>}
       {error && <div className="notice error" role="alert">{error}</div>}
+      {onContinue && <button style={{marginLeft:8}} disabled={busy} onClick={onContinue}>继续回忆练习</button>}
       {loading && <p>正在读取历史故事…</p>}
       {!loading && !stories.length && !error && <p>还没有故事，点击上方按钮开始。</p>}
     </div>
@@ -50,6 +52,7 @@ export default function StoryPanel() {
         {!ai && <p>这是旧版模板记录。可点击下方按钮，用这些词重新生成AI故事。</p>}
         <StoryText text={s.story_en} words={s.target_words || []}/>
         <details style={{marginTop:16}}><summary>查看中文翻译</summary><StoryText text={s.story_zh} words={s.target_words || []}/></details>
+        {!!s.references?.length && <details style={{marginTop:16}}><summary>本次检索参考（{s.references.length}条）</summary><p>以下资料提供词义和语境参考，不代表故事逐句经过验证。</p>{s.references.map(ref => <div key={ref.id}><strong>{ref.title}</strong><p>{ref.text}</p><small>{ref.source} · {ref.id}</small></div>)}</details>}
         {s.memory_tip && <p className="story-tip">记忆提示：{s.memory_tip}</p>}
         <button disabled={busy} onClick={() => generate(s.id)}>{ai ? '用这些词再写一个故事' : '将这些词改写为AI故事'}</button>
       </article>;

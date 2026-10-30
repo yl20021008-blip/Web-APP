@@ -1,3 +1,4 @@
+import { retrieveSources } from "@/lib/story-rag";
 import { serviceFailure, ok, fail, readJson } from "@/app/api/_helpers";
 import { requireSession } from "@/lib/auth";
 import { generateStory, StoryError } from "@/lib/story-ai";
@@ -24,11 +25,12 @@ export async function GET() {
       let tip = row.memory_tip;
       let targetWords: string[] = [];
       let model: string | null = null;
+      let references: unknown[] = [];
       try {
         const meta = JSON.parse(tip);
-        if (meta.format === "ai_story_v2") { tip = meta.tip; targetWords = meta.words; model = meta.model; }
+        if (meta.format === "ai_story_v2") { tip = meta.tip; targetWords = meta.words; model = meta.model; references = Array.isArray(meta.references) ? meta.references : []; }
       } catch { /* Historical plain text tips remain readable. */ }
-      return { ...row, memory_tip: tip, target_words: targetWords, model };
+      return { ...row, memory_tip: tip, target_words: targetWords, model, references };
     }));
   } catch (error) {
     return serviceFailure(error);
@@ -39,12 +41,14 @@ export async function POST(request: Request) {
   let client: import("pg").PoolClient | undefined;
   try {
     const session = await requireSession();
-    const body = await readJson<{ size?: number; storyId?: number }>(request);
+    const body = await readJson<{ size?: number; storyId?: number; wordIds?: number[] }>(request);
     const size = Number(body.size ?? 10);
     const storyId = body.storyId === undefined ? null : Number(body.storyId);
     if (storyId !== null && (!Number.isSafeInteger(storyId) || storyId < 1)) return fail("故事编号无效。", 400);
     if (!process.env.STORY_API_KEY?.trim() || !process.env.STORY_MODEL?.trim()) throw new StoryError("尚未配置故事 API，请检查 Vercel 的 STORY_API_KEY 和 STORY_MODEL，并重新部署。", 503);
     if (!Number.isInteger(size) || size < 5 || size > 10) return fail("每组请选择5至10个词。", 400);
+    const wordIds = body.wordIds;
+    if (wordIds !== undefined && (!Array.isArray(wordIds) || wordIds.length < 5 || wordIds.length > 10 || wordIds.some(id => !Number.isSafeInteger(id) || id < 1))) return fail("学习流程需要5–10个有效目标词。", 400);
     client = await getPool().connect();
     await client.query("BEGIN");
     // Serialize generation per learner across server instances.
@@ -64,12 +68,13 @@ export async function POST(request: Request) {
       if (targetWords.length < 5) throw new StoryError("该旧故事没有足够的词汇记录，请使用顶部生成按钮。", 400);
     }
     const selected = await client.query<{ id: number; word: string; annotation: string | null }>(
-      `SELECT w.id, w.word, w.annotation FROM learning_status ls
+      `SELECT w.id, w.word, w.annotation, w.example_sentence, w.collocation, w.chapter FROM learning_status ls
        JOIN words w ON w.id = ls.word_id
        WHERE ls.user_id = $1 AND ls.status <> 'new'
        AND ($2::text[] IS NULL OR w.word = ANY($2::text[]))
+       AND ($4::int[] IS NULL OR w.id = ANY($4::int[]))
        ORDER BY ls.last_review_at DESC NULLS LAST, w.id ASC LIMIT $3`,
-      [session.userId, targetWords, size]
+      [session.userId, targetWords, size, wordIds ?? null]
     );
 
     if (selected.rows.length < 5) {
@@ -81,7 +86,8 @@ export async function POST(request: Request) {
       [session.userId]
     );
     const groupNumber = Number(numberRow.rows[0].next_no || 1);
-    const story = await generateStory(selected.rows);
+    const references = retrieveSources(selected.rows);
+    const story = await generateStory(selected.rows, references);
 
     const inserted = await client.query<{ id: number }>(
       `
@@ -99,7 +105,7 @@ export async function POST(request: Request) {
         story.titleZh,
         story.storyEn,
         story.storyZh,
-        JSON.stringify({ format: "ai_story_v2", tip: story.memoryTip, words: selected.rows.map(w => w.word), model: process.env.STORY_MODEL }),
+        JSON.stringify({ format: "ai_story_v2", tip: story.memoryTip, words: selected.rows.map(w => w.word), model: process.env.STORY_MODEL, references }),
         selected.rows.length
       ]
     );

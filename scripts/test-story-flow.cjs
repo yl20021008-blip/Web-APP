@@ -16,6 +16,7 @@ const client={release(){},async query(sql,params){
  return {rows:[]};
 }};
 const deps={
+ '@/lib/story-rag':{retrieveSources:words=>words.map(w=>({id:'word-'+w.id,title:w.word,text:w.annotation,source:'wordbook'}))},
  '@/app/api/_helpers':{ok:data=>({ok:true,data}),fail:(error,status)=>({ok:false,error,status}),readJson:async r=>r.json(),serviceFailure:()=>({ok:false,status:503})},
  '@/lib/auth':{requireSession:async()=>({userId:1})},
  '@/lib/db':{getPool:()=>({connect:async()=>client}),query:async()=>({rows:[]})},
