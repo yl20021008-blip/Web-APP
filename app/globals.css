@@ -614,3 +614,14 @@ button.ghost {
 .story-card mark { background: #e3eed6; color: inherit; padding: 1px 3px; border-radius: 4px; font-weight: 700; }
 .story-meta { color: var(--muted); font-size: 13px; }
 .story-tip { border-left: 3px solid var(--primary, #6f847d); padding: 10px 14px; margin-top: 20px; }
+
+.bottom-nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.learning-hub { margin-bottom: 18px; }
+.learning-tabs, .batch-picker, .word-selection { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.learning-tabs { margin: 18px 0; }
+.batch-picker input { width: 90px; min-height: 42px; padding: 8px; border: 1px solid var(--border); border-radius: 10px; }
+.learning-options { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.word-selection label { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid var(--border); border-radius: 12px; }
+.word-selection input { width: auto; }
+.learning-hub .muted, p.muted { color: var(--muted); font-size: 13px; }
+@media (max-width: 600px) { .bottom-nav { grid-template-columns: repeat(5, minmax(0,1fr)); } .nav-btn { font-size: 11px; padding: 8px 3px; } .learning-options { grid-template-columns: 1fr; } }

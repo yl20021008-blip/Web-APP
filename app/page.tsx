@@ -57,16 +57,7 @@ type StudySessionStats = {
 };
 
 const navItems: Array<[PageKey, string, string]> = [
-  ["dashboard", "🏠", "首页"],
-  ["flow", "⚡", "今日学习"],
-  ["ielts", "🎓", "雅思"],
-  ["study", "🧠", "新词"],
-  ["review", "🗓️", "复习"],
-  ["weak", "🎯", "薄弱"],
-  ["summary", "✅", "总结"],
-  ["chapters", "📚", "章节"],
-  ["story", "📖", "故事"],
-  ["wordbook", "🔎", "词库"]
+  ["dashboard", "🏠", "首页"], ["flow", "📚", "学习台"], ["ielts", "🎓", "雅思训练"], ["story", "📖", "故事"], ["wordbook", "🔎", "词库"]
 ];
 
 async function api<T>(url: string, options?: RequestInit): Promise<T> {
@@ -148,7 +139,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v3.2.1 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
+          <p>v3.3.0 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -162,9 +153,9 @@ export default function Home() {
       ) : (
         <>
           {active === "dashboard" && <Dashboard onMessage={setMessage} go={setActive} />}
-          {active === "flow" && <LearningFlow onMessage={setMessage} go={setActive} />}
+          <div style={{display: active === "flow" ? "block" : "none"}}><LearningFlow onMessage={setMessage} go={setActive} /></div>
           {active === "ielts" && <IELTSTraining onMessage={setMessage} />}
-          {active === "study" && <Study mode="today" onMessage={setMessage} />}
+          {active === "study" && <Study mode="new" onMessage={setMessage} />}
           {active === "review" && <ReviewPlan />}
           {active === "weak" && <Study mode="weak" onMessage={setMessage} />}
           {active === "summary" && <DailySummary go={setActive} />}
@@ -230,10 +221,12 @@ function Dashboard({ onMessage, go }: { onMessage: (m: string) => void; go: (p: 
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [error, setError] = useState("");
   const [goal, setGoal] = useState(30);
+  const [todayDone,setTodayDone] = useState<number | null>(null);
 
   async function load() {
     try {
-      setMetrics(await api<Metrics>("/api/dashboard"));
+      const [metricsResult, summary] = await Promise.all([api<Metrics>("/api/dashboard"),api<{today: {reviewed_today: number}}>("/api/daily/summary")]);
+      setMetrics(metricsResult); setTodayDone(Number(summary.today.reviewed_today));
     } catch (err) {
       setError(err instanceof Error ? err.message : "读取失败");
     }
@@ -251,7 +244,7 @@ function Dashboard({ onMessage, go }: { onMessage: (m: string) => void; go: (p: 
     onMessage(`今日目标已设置为 ${value} 个。`);
   }
 
-  const learnedToday = Number(localStorage.getItem(todayKey("answered")) || 0);
+  const learnedToday = todayDone ?? 0;
   const progress = Math.min(100, Math.round((learnedToday / Math.max(goal, 1)) * 100));
 
   const metricItems = [
@@ -274,17 +267,18 @@ function Dashboard({ onMessage, go }: { onMessage: (m: string) => void; go: (p: 
       <div className="card hero-card">
         <h2>今天的词汇学习路径</h2>
         <p style={{ color: "var(--muted)" }}>
-          先用“一键”完成复习和新词，再用“雅思”把词转化成听力、阅读、写作和口语能力。
+          在学习台选择新词、复习或薄弱词，自由设置每批数量；想练运用时，再进入故事或雅思专项。
         </p>
+        <p>个人每日目标（只作提醒，不限制学习量）</p>
         <div className="button-row">
           {[10, 20, 30, 50].map((v) => <button key={v} className={goal === v ? "primary" : ""} onClick={() => saveGoal(v)}>{v} 个</button>)}
         </div>
         <div className="progress-wrap" style={{ marginTop: 18 }}>
-          <div className="progress-label">今日已完成 {learnedToday} / {goal}</div>
+          <div className="progress-label">今日已提交 {todayDone === null ? "—" : learnedToday} 次 / 目标 {goal} 次</div>
           <div className="progress"><div style={{ width: `${progress}%` }} /></div>
         </div>
         <div className="button-row" style={{ marginTop: 18 }}>
-          <button className="primary big-cta" onClick={() => go("flow")}>⚡ 一键学习</button>
+          <button className="primary big-cta" onClick={() => go("flow")}>📚 进入学习台</button>
           <button className="big-cta" onClick={() => go("ielts")}>🎓 雅思训练</button>
           <button onClick={() => go("summary")}>查看今日总结</button>
         </div>
@@ -294,31 +288,46 @@ function Dashboard({ onMessage, go }: { onMessage: (m: string) => void; go: (p: 
 }
 
 function LearningFlow({ onMessage, go }: { onMessage: (m: string) => void; go: (page: PageKey) => void }) {
-  const [step,setStep] = useState(0);
+  const [section,setSection] = useState<"home" | "review" | "new" | "weak" | "story" | "recall" | "summary">("home");
+  const [batch,setBatch] = useState(20);
+  const [count,setCount] = useState(20);
+  const [run,setRun] = useState(0);
   const [words,setWords] = useState<WordTask[]>([]);
+  const [selected,setSelected] = useState<number[]>([]);
   const [revealed,setRevealed] = useState(false);
   const [draft,setDraft] = useState("");
   const [responses,setResponses] = useState<Record<number,string>>({});
-  const labels = ["到期复习", "学习新词", "语境故事", "回忆与表达", "今日总结"];
-  function collected(next: WordTask[]) {
-    setWords(prev => [...new Map([...prev,...next].map(w => [w.id,w])).values()].slice(0,10));
-    setStep(s => s+1);
+  function record(word: WordTask) {
+    setWords(prev => [...prev.filter(w => w.id !== word.id),word].slice(-200));
+    setSelected(prev => prev.includes(word.id) ? prev : [...prev,word.id].slice(-10));
   }
+  function start(mode: "review" | "new" | "weak") {
+    if (!Number.isInteger(batch) || batch < 1 || batch > 200) return;
+    setCount(batch); setRun(n=>n+1); setSection(mode);
+  }
+  const choices: Array<[typeof section,string]> = [["home","学习安排"],["review","到期复习"],["new","学习新词"],["weak","薄弱词"],["story","故事阅读"],["recall","回忆与表达"],["summary","今日总结"]];
   return <section>
-    <div className="card" style={{marginBottom:16}}><h2>今日学习</h2><p>复习5词 → 新学5词 → 阅读故事 → 回忆与表达。词汇回答会保存；流程位置和表达草稿仅保留在当前页面。</p><p role="status">{labels.map((label,i) => `${i === step ? "▶ " : i < step ? "✓ " : ""}${label}`).join(" / ")}</p></div>
-    {step === 0 && <div style={{marginBottom:12}}><button onClick={()=>setStep(1)}>先学新词，稍后再复习</button></div>}
-    {step === 0 && <Study key="flow-review" mode="review" onMessage={onMessage} onComplete={collected}/>}
-    {step === 1 && <Study key="flow-new" mode="new" onMessage={onMessage} onComplete={collected}/>}
-    {step === 2 && (words.length >= 5 ? <StoryPanel wordIds={words.map(w=>w.id)} onContinue={()=>setStep(3)}/> : <div className="card"><p>本轮不足5个目标词，先跳过故事生成。</p><button onClick={()=>setStep(3)}>继续回忆</button></div>)}
-    {step === 3 && <div className="card"><h2>不看答案，回忆这些词</h2><p>写出词义，再用其中3个词写两句英文。此处为自查练习，不自动评分，也不修改掌握等级。</p>
-      {words.map(w=><div className="form-row" key={w.id}><label>{w.word}</label><input value={responses[w.id] || ""} onChange={e=>setResponses({...responses,[w.id]:e.target.value})} placeholder="回忆中文意思"/>{revealed && <p>{w.annotation || "词库暂无释义"}</p>}</div>)}
-      <div className="form-row"><label>用词表达</label><textarea rows={4} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="用至少3个目标词写两句英文…"/></div>
-      <div className="button-row"><button onClick={()=>setRevealed(!revealed)}>{revealed ? "隐藏释义" : "查看释义并自查"}</button><button className="primary" onClick={()=>setStep(4)}>完成，查看总结</button></div></div>}
-    {step === 4 && <><DailySummary go={go}/><button style={{marginTop:16}} onClick={()=>{setStep(0);setWords([]);setResponses({});setDraft("");setRevealed(false);}}>开始下一轮</button></>}
+    <div className="card learning-hub"><h2>我的学习台</h2><p>你决定学多少、先做什么。建议先复习，再学新词；故事和表达训练随时可选。</p>
+      <div className="learning-tabs">{choices.map(([key,label])=><button key={key} className={section===key ? "primary" : ""} onClick={()=>{if(key === "review" || key === "new" || key === "weak") start(key); else setSection(key);}}>{label}</button>)}</div>
+      <div className="batch-picker"><label htmlFor="batch-count">每批词数</label><input id="batch-count" type="number" min={1} max={200} value={Number.isNaN(batch) ? "" : batch} onChange={e=>setBatch(e.target.valueAsNumber)}/>{[10,20,50,100].map(n=><button key={n} onClick={()=>setBatch(n)}>{n}词</button>)}</div>
+      {(!Number.isInteger(batch) || batch < 1 || batch > 200) && <p role="alert">请输入1–200之间的整数。</p>}
+      <p className="muted">这是每批数量，不是每日上限；可连续学下一批。修改数量后点击任务入口开始新一批。已提交的回答会保存。</p>
+    </div>
+    {section === "home" && <div className="grid learning-options">
+      <div className="card"><h3>记忆训练</h3><p>先回忆，再看释义和例句。按自己的时间分批学习。</p><div className="button-row"><button className="primary" onClick={()=>start("new")}>开始学新词</button><button onClick={()=>start("review")}>复习到期词</button><button onClick={()=>start("weak")}>巩固薄弱词</button></div></div>
+      <div className="card"><h3>把词用起来</h3><p>本次已练习 {words.length} 个不同的词。可以选词阅读故事，也可以直接做表达训练。</p><div className="button-row"><button onClick={()=>setSection("story")}>选词生成故事</button><button onClick={()=>setSection("recall")}>回忆与表达</button><button onClick={()=>go("ielts")}>雅思专项</button></div></div>
+      <div className="card"><h3>进度与词库</h3><div className="button-row"><button onClick={()=>setSection("summary")}>今日总结</button><button onClick={()=>go("review")}>复习计划</button><button onClick={()=>go("chapters")}>章节进度</button><button onClick={()=>go("wordbook")}>查词与词库</button></div></div>
+    </div>}
+    {(["review","new","weak"] as string[]).includes(section) && <Study key={`${section}-${run}`} mode={section as "review" | "new" | "weak"} targetCount={count} onMessage={onMessage} onWordAnswered={record} onComplete={()=>setSection("home")}/>}
+    {(section === "story" || section === "recall") && <div className="card" style={{marginBottom:16}}><h3>选择本次训练词</h3><p>最多选10个词。故事至少需要5个；表达练习可少于5个。这里只列出当前学习台中已提交回答的词。</p><div className="word-selection">{words.map(w=><label key={w.id}><input type="checkbox" checked={selected.includes(w.id)} disabled={!selected.includes(w.id) && selected.length>=10} onChange={e=>setSelected(prev=>e.target.checked ? [...prev,w.id] : prev.filter(id=>id!==w.id))}/>{w.word}</label>)}</div><p>已选 {selected.length} / 10</p>{!words.length && <button onClick={()=>start("new")}>先学习一些单词</button>}</div>}
+    {section === "story" && <><p>少于5个本轮词时，生成按钮会使用你最近学过的词。历史故事仍可查看。</p><StoryPanel wordIds={selected.length>=5 ? selected : undefined} onContinue={()=>setSection("recall")}/></>}
+    {section === "recall" && <div className="card"><h2>回忆与表达</h2><p>先回忆词义，再用所选词写几句英文。这是自查练习，不自动评分。</p>{words.filter(w=>selected.includes(w.id)).map(w=><div className="form-row" key={w.id}><label>{w.word}</label><input value={responses[w.id] || ""} onChange={e=>setResponses({...responses,[w.id]:e.target.value})} placeholder="回忆中文意思"/>{revealed && <p>{w.annotation || "暂无释义"}</p>}</div>)}<div className="form-row"><label>用词表达</label><textarea rows={5} value={draft} onChange={e=>setDraft(e.target.value)} placeholder="用目标词写几句英文…"/></div><div className="button-row"><button onClick={()=>setRevealed(!revealed)}>{revealed ? "隐藏释义" : "查看释义"}</button><button onClick={()=>setSection("home")}>返回学习安排</button><button onClick={()=>setSection("summary")}>查看总结</button></div></div>}
+    {section === "summary" && <DailySummary go={go}/>}
+    <p className="muted">词汇回答和故事已保存。当前选词与表达草稿可在本次登录内切换页面保留，刷新或退出后清空。</p>
   </section>;
 }
 
-function Study({ onMessage, mode, onComplete }: { onMessage: (m: string) => void; mode: "today" | "weak" | "smart" | "review" | "new"; onComplete?: (words: WordTask[]) => void }) {
+function Study({ onMessage, mode, onComplete, targetCount, onWordAnswered }: { onMessage: (m: string) => void; mode: "today" | "weak" | "smart" | "review" | "new"; onComplete?: (words: WordTask[]) => void; targetCount?: number; onWordAnswered?: (word: WordTask) => void }) {
   const [loadingTasks, setLoadingTasks] = useState(true);
   const [queue, setQueue] = useState<WordTask[]>([]);
   const [index, setIndex] = useState(0);
@@ -332,8 +341,8 @@ function Study({ onMessage, mode, onComplete }: { onMessage: (m: string) => void
     setLoadingTasks(true);
     setError("");
     try {
-      const target = onComplete ? 5 : Number(localStorage.getItem(todayKey("daily_goal")) || 30);
-      const data = await api<WordTask[]>(`/api/study/today?mode=${mode}&target=${target}`, { signal: AbortSignal.timeout(20000) });
+      const target = targetCount ?? Number(localStorage.getItem(todayKey("daily_goal")) || 30);
+      const data = await api<WordTask[]>(`/api/study/today?mode=${mode}&target=${target}&newLimit=${target}&reviewLimit=${target}`, { signal: AbortSignal.timeout(20000) });
       setQueue(data);
       setIndex(0);
       setPhase(data.length ? "question" : "complete");
@@ -398,6 +407,7 @@ function Study({ onMessage, mode, onComplete }: { onMessage: (m: string) => void
         body: JSON.stringify({ wordId: current.id, result })
       });
 
+      onWordAnswered?.(current);
       updateLocalStats(result);
       if (result === "忘记") recycleForgotten(current);
       setSavedResult(saved);
@@ -416,7 +426,7 @@ function Study({ onMessage, mode, onComplete }: { onMessage: (m: string) => void
     else { setPhase("question"); setIndex(index + 1); }
   }
 
-  if (error) return <section className="card"><div className="notice error" role="alert">{error}</div><div className="button-row" style={{marginTop:16}}><button className="primary" onClick={load}>重新加载单词</button>{onComplete && <button onClick={() => onComplete([])}>暂时跳过这一步</button>}</div></section>;
+  if (error) return <section className="card"><div className="notice error" role="alert">{error}</div><div className="button-row" style={{marginTop:16}}><button className="primary" onClick={load}>重新加载单词</button>{onComplete && <button onClick={() => onComplete([])}>返回学习安排</button>}</div></section>;
 
   if (loadingTasks) return <p role="status">正在准备学习任务…</p>;
 
@@ -425,7 +435,7 @@ function Study({ onMessage, mode, onComplete }: { onMessage: (m: string) => void
     return (
       <section className="card">
         <h2>{mode === "smart" ? "今日学习流完成" : mode === "weak" ? "薄弱词训练完成" : "本组学习完成"}</h2>
-        <p style={{ color: "var(--muted)" }}>这是本轮学习反馈。忘记词已进行本组回炉。</p>
+        <p style={{ color: "var(--muted)" }}>{queue.length ? "这是本批学习反馈。你可以继续学习，也可以选择其他训练。" : mode === "review" ? "当前没有到期复习词。可返回学习安排，选择新词或薄弱词训练。" : "当前没有符合条件的词。请返回词库检查词汇与学习状态。"}</p>
         <div className="grid metrics">
           <div className="metric"><div className="label">已完成</div><div className="value">{stats.answered}</div></div>
           <div className="metric"><div className="label">正确率</div><div className="value">{accuracy}%</div></div>
@@ -434,8 +444,8 @@ function Study({ onMessage, mode, onComplete }: { onMessage: (m: string) => void
           <div className="metric"><div className="label">回炉</div><div className="value">{stats.recycled}</div></div>
         </div>
         <div className="button-row" style={{ marginTop: 18 }}>
-          <button className="primary" onClick={load}>继续下一组</button>
-          {onComplete && <button onClick={() => onComplete([...new Map(queue.map(w => [w.id,w])).values()])}>继续下一步</button>}
+          <button className="primary" onClick={load}>继续下一批单词</button>
+          {onComplete && <button onClick={() => onComplete([...new Map(queue.map(w => [w.id,w])).values()])}>选择下一项训练</button>}
         </div>
       </section>
     );

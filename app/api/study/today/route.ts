@@ -73,9 +73,9 @@ export async function GET(request: Request) {
     const session = await requireSession();
     const url = new URL(request.url);
     const mode = String(url.searchParams.get("mode") || "today");
-    const newLimit = Math.min(Math.max(Number(url.searchParams.get("newLimit") || 20),1), 80);
+    const newLimit = Math.min(Math.max(Number(url.searchParams.get("newLimit") || 20),1), 200);
     const reviewLimit = Math.min(Number(url.searchParams.get("reviewLimit") || 120), 240);
-    const target = Math.min(Number(url.searchParams.get("target") || 30), 80);
+    const target = Math.min(Number(url.searchParams.get("target") || 30), 200);
 
     if (![newLimit, reviewLimit, target].every(v => Number.isInteger(v) && v > 0)) return fail("学习数量参数无效。", 400);
     if (mode === "weak") {
@@ -101,7 +101,7 @@ export async function GET(request: Request) {
         `,
         [session.userId, reviewLimit]
       );
-      return ok(weak.rows);
+      return ok(weak.rows.slice(0, target));
     }
 
     const due = mode === "new" ? { rows: [] } : await query(

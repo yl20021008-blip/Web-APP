@@ -7,4 +7,10 @@ const deps={
  '@/lib/db':{query:async(sql,params)=>{queries++;assert.equal(params[0],42);return {rows:sql.includes("ls.status = 'new'") ? [{id:2,task_type:'new'}] : [{id:1,task_type:'review'}]}}}
 };
 const ctx={exports:{},require:id=>deps[id],URL};vm.runInNewContext(code,ctx);
-(async()=>{const review=await ctx.exports.GET({url:'https://example.com/api/study/today?mode=review&target=5'});const fresh=await ctx.exports.GET({url:'https://example.com/api/study/today?mode=new&target=5'});assert.equal(review.data.length,1);assert.equal(review.data[0].id,1);assert.equal(fresh.data.length,1);assert.equal(fresh.data[0].id,2);assert.equal(queries,2);console.log('PASS: guided review/new stages return distinct authenticated tasks');})().catch(e=>{console.error(e);process.exitCode=1});
+(async()=>{const review=await ctx.exports.GET({url:'https://example.com/api/study/today?mode=review&target=5'});const fresh=await ctx.exports.GET({url:'https://example.com/api/study/today?mode=new&target=5'});assert.equal(review.data.length,1);assert.equal(review.data[0].id,1);assert.equal(fresh.data.length,1);assert.equal(fresh.data[0].id,2);assert.equal(queries,2);
+ const invalid=await ctx.exports.GET({url:'https://example.com/api/study/today?mode=new&target=-1'});assert.equal(invalid.ok,false);
+ let requestedLimit;
+ deps['@/lib/db'].query=async(sql,params)=>{requestedLimit=params[1];return {rows:Array.from({length:params[1]},(_,i)=>({id:i+1,task_type:'new'}))}};
+ const large=await ctx.exports.GET({url:'https://example.com/api/study/today?mode=new&target=100&newLimit=100'});assert.equal(large.data.length,100);assert.equal(requestedLimit,100);
+ const capped=await ctx.exports.GET({url:'https://example.com/api/study/today?mode=new&target=999&newLimit=999'});assert.equal(capped.data.length,200);
+ console.log('PASS: guided review/new stages return distinct authenticated tasks');})().catch(e=>{console.error(e);process.exitCode=1});
