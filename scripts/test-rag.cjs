@@ -7,7 +7,8 @@ assert.ok(sources.some(s=>s.id==='note-earth-layers' && s.text.includes('地核'
 assert.ok(sources.some(s=>s.id==='word-1' && s.text.includes('Earth is hot')));
 assert.ok(!sources.some(s=>s.id==='note-map-coordinates'));
 assert.equal(ctx.exports.retrieveSources([{id:2,word:'apple',annotation:null}]).length,0);
-const ai={exports:{},process:{env:{STORY_API_KEY:'fake',STORY_MODEL:'mock',STORY_API_BASE_URL:'https://example.com/v1'}},URL,AbortSignal,fetch:async(url,opts)=>{
+const match={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/word-match.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,match);
+const ai={exports:{},require:id=>match.exports,process:{env:{STORY_API_KEY:'fake',STORY_MODEL:'mock',STORY_API_BASE_URL:'https://example.com/v1'}},URL,AbortSignal,fetch:async(url,opts)=>{
  const body=JSON.parse(opts.body);const data=JSON.parse(body.messages[1].content);assert.equal(data.retrievedReferences[0].id,'note-earth-layers');
  return {ok:true,json:async()=>({choices:[{message:{content:JSON.stringify({titleEn:'The Core',titleZh:'地核',storyEn:'We studied the core.',storyZh:'研究地核',memoryTip:'联想'})}}]})};
 }};

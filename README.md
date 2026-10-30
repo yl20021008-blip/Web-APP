@@ -1,5 +1,5 @@
-# IELTS Vocabulary Web App v3.3.0
+# IELTS Vocabulary Web App v3.4.0
 
-先读 START_HERE_v3.3_中文.md。自由学习台、可选1–200词每批、RAG故事与自查训练。
+先看 START_HERE_v3.4_中文.md。AI例句填空、缓存和故事覆盖校验升级，保留自由学习台与RAG。
 
-npm ci; npm run build。测试：node scripts/test-guided-tasks.cjs、node scripts/test-story-flow.cjs、node scripts/test-rag.cjs。
+npm ci; npm run build。测试 scripts/test-model-upgrade.cjs 等。

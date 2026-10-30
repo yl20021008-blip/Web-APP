@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import AIExample from "./components/AIExample";
 import StoryPanel from "./components/StoryPanel";
 
 type ApiResponse<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -139,7 +140,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v3.3.0 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
+          <p>v3.4.0 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -502,6 +503,7 @@ function AnswerPanel({ current, savedResult, speak, onNext, busy, last }: {
           {current.example_translation ? <p><strong>翻译：</strong>{current.example_translation}</p> : null}
         </div>
       </div>
+      <AIExample key={current.id} wordId={current.id} />
       {savedResult ? <div className="rating-saved">已记录：{savedResult.result} · 新等级 {savedResult.newLevel} · {savedResult.intervalLabel || "已安排复习"}</div> : null}
       <div className="button-row" style={{ justifyContent: "center", marginTop: 22 }}>
         <button className="primary" disabled={busy} onClick={onNext}>{last ? "查看本组反馈" : "下一词"}</button>
@@ -539,7 +541,7 @@ function IELTSTraining({ onMessage }: { onMessage: (m: string) => void }) {
           ))}
         </div>
       </div>
-      <TrainingMode mode={mode} onMessage={onMessage} />
+      <TrainingMode key={mode} mode={mode} onMessage={onMessage} />
     </section>
   );
 }
@@ -561,6 +563,7 @@ function TrainingMode({ mode, onMessage }: { mode: TrainMode; onMessage: (m: str
     setTyped("");
     setWriting("");
     setIndex(0);
+    setSessionDone(0);
     try {
       const apiMode = mode === "sentence" || mode === "speaking" ? "output" : "mixed";
       const data = await api<WordTask[]>(`/api/training/words?mode=${apiMode}&limit=24`);
@@ -667,12 +670,7 @@ function TrainingMode({ mode, onMessage }: { mode: TrainMode; onMessage: (m: str
         </>
       ) : null}
 
-      {mode === "sentence" ? (
-        <>
-          <div className="sentence-blank">{maskWordInSentence(current.example_sentence, current.word)}</div>
-          {!revealed ? <p className="hidden-hint">根据语境想目标词。这个模式训练阅读、搭配和写作用法。</p> : <><div className="word">{current.word}</div><TrainingAnswer current={current} speak={speak} compact /></>}
-        </>
-      ) : null}
+      {mode === "sentence" ? <AIExample key={current.id} wordId={current.id} fillBlank /> : null}
 
       {mode === "speaking" ? (
         <>
@@ -691,7 +689,7 @@ function TrainingMode({ mode, onMessage }: { mode: TrainMode; onMessage: (m: str
       ) : null}
 
       <div className="button-row" style={{ justifyContent: "center", marginTop: 24 }}>
-        {!revealed ? <button className="primary" onClick={() => setRevealed(true)}>显示答案 / 参考</button> : null}
+        {!revealed && mode !== "sentence" ? <button className="primary" onClick={() => setRevealed(true)}>显示答案 / 参考</button> : null}
         <button onClick={next}>{index + 1 >= queue.length ? "完成并刷新" : "下一题"}</button>
       </div>
     </section>
@@ -714,6 +712,7 @@ function TrainingAnswer({ current, speak, compact = false }: { current: WordTask
           {current.chapter ? <p><strong>Chapter:</strong> {current.chapter}</p> : null}
         </div>
       </div>
+      <AIExample key={current.id} wordId={current.id} />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+import { targetPattern } from "@/lib/word-match";
 import type { Source } from "@/lib/story-rag";
 import { useEffect, useRef, useState } from "react";
 type Story = { id: number; title_en: string; title_zh: string; story_en: string; story_zh: string; memory_tip: string; provider: string; model: string | null; created_at: string; word_count: number; references?: Source[]; target_words: string[] };
@@ -11,7 +12,7 @@ async function request(options?: RequestInit) {
 }
 function StoryText({ text, words }: { text: string; words: string[] }) {
   const clean = text.replace(/\*\*/g, '');
-  const escaped = [...words].filter(Boolean).sort((a,b) => b.length-a.length).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const escaped = [...words].filter(Boolean).map(targetPattern);
   if (!escaped.length) return <div className="story-text">{clean}</div>;
   const re = new RegExp(`(?<![a-zA-Z])(${escaped.join('|')})(?![a-zA-Z])`, 'gi');
   return <div className="story-text">{clean.split(re).map((part,i) => i % 2 ? <mark key={i}>{part}</mark> : part)}</div>;
