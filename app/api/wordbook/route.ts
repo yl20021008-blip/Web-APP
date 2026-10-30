@@ -1,4 +1,4 @@
-import { ok, fail } from "@/app/api/_helpers";
+import { serviceFailure, ok, fail } from "@/app/api/_helpers";
 import { requireSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
     );
 
     return ok({ rows: rows.rows, chapters: chapters.rows.map((r) => r.chapter), page, pageSize });
-  } catch {
-    return fail("未登录", 401);
+  } catch (error) {
+    return serviceFailure(error);
   }
 }

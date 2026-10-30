@@ -1,4 +1,4 @@
-import { ok, fail, readJson } from "@/app/api/_helpers";
+import { serviceFailure, ok, fail, readJson } from "@/app/api/_helpers";
 import { requireSession } from "@/lib/auth";
 import { query } from "@/lib/db";
 
@@ -69,8 +69,8 @@ export async function GET() {
       [session.userId]
     );
     return ok(rows.rows);
-  } catch {
-    return fail("未登录", 401);
+  } catch (error) {
+    return serviceFailure(error);
   }
 }
 

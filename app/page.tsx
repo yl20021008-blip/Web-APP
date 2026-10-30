@@ -76,8 +76,14 @@ async function api<T>(url: string, options?: RequestInit): Promise<T> {
       ...(options?.headers || {})
     }
   });
-  const payload = (await res.json()) as ApiResponse<T>;
+  let payload: ApiResponse<T>;
+  try {
+    payload = await res.json() as ApiResponse<T>;
+  } catch {
+    throw new Error(`服务响应异常（HTTP ${res.status}），请稍后重试。`);
+  }
   if (!payload.ok) throw new Error(payload.error || "请求失败");
+  if (!res.ok) throw new Error(`请求失败（HTTP ${res.status}）`);
   return payload.data;
 }
 
@@ -141,7 +147,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v3.0.1 雅思四技能词汇训练 · 口语热修 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
+          <p>v3.0.2 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -673,27 +679,28 @@ function TrainingAnswer({ current, speak, compact = false }: { current: WordTask
 
 function DailySummary({ go }: { go: (p: PageKey) => void }) {
   const [data, setData] = useState<any | null>(null);
-  const answered = Number(localStorage.getItem(todayKey("answered")) || 0);
-  const forgot = Number(localStorage.getItem(todayKey("forgot")) || 0);
-  const fuzzy = Number(localStorage.getItem(todayKey("fuzzy")) || 0);
-  const correct = Number(localStorage.getItem(todayKey("correct")) || 0);
-  const mastered = Number(localStorage.getItem(todayKey("mastered")) || 0);
-  const accuracy = answered ? Math.round(((correct + mastered) / answered) * 100) : 0;
+  const [error, setError] = useState("");
+  const answered = Number(data?.today?.reviewed_today || 0);
+  const forgot = Number(data?.today?.forgot_today || 0);
+  const fuzzy = Number(data?.today?.fuzzy_today || 0);
+  const correct = Number(data?.today?.remembered_today || 0);
+  const accuracy = answered ? Math.round((correct / answered) * 100) : 0;
 
   useEffect(() => {
-    api<any>("/api/daily/summary").then(setData).catch(() => setData(null));
+    api<any>("/api/daily/summary").then(setData).catch((err) => setError(err instanceof Error ? err.message : "读取失败"));
   }, []);
 
   return (
     <section className="grid">
       <div className="card">
         <h2>今日学习总结</h2>
+        {error ? <div className="notice error" role="alert">{error}</div> : null}
         <p style={{ color: "var(--muted)" }}>每天结束前看一次：明天要复习什么，哪些词还需要输出训练。</p>
         <div className="grid metrics">
-          <div className="metric"><div className="label">今日完成</div><div className="value">{answered}</div></div>
-          <div className="metric"><div className="label">正确率</div><div className="value">{accuracy}%</div></div>
-          <div className="metric"><div className="label">忘记</div><div className="value">{forgot}</div></div>
-          <div className="metric"><div className="label">模糊</div><div className="value">{fuzzy}</div></div>
+          <div className="metric"><div className="label">今日完成</div><div className="value">{data ? answered : "—"}</div></div>
+          <div className="metric"><div className="label">正确率</div><div className="value">{data ? `${accuracy}%` : "—"}</div></div>
+          <div className="metric"><div className="label">忘记</div><div className="value">{data ? forgot : "—"}</div></div>
+          <div className="metric"><div className="label">模糊</div><div className="value">{data ? fuzzy : "—"}</div></div>
           <div className="metric"><div className="label">明日复习</div><div className="value">{data?.tomorrow?.due_tomorrow ?? "—"}</div></div>
         </div>
         <div className="button-row" style={{ marginTop: 18 }}>
@@ -778,7 +785,7 @@ function Stories({ onMessage }: { onMessage: (m: string) => void }) {
   }
   return (
     <section className="grid">
-      <div className="card"><h2>AI式故事记忆</h2><p style={{ color: "var(--muted)" }}>按已学词生成科研场景记忆路线，包含中英故事和快速自测。</p><button className="primary" disabled={busy} onClick={generate}>{busy ? "正在生成…" : "生成一组故事"}</button></div>
+      <div className="card"><h2>故事记忆</h2><p style={{ color: "var(--muted)" }}>按已学词组合模板式中英记忆故事，帮助联想复习。</p><button className="primary" disabled={busy} onClick={generate}>{busy ? "正在生成…" : "生成一组故事"}</button></div>
       {stories.map((s) => <div className="card" key={s.id}><h2>{s.title_zh}</h2><p style={{ color: "var(--muted)" }}>{s.title_en} · {s.word_count} words</p><div className="story-text">{s.story_zh}</div><details style={{ marginTop: 16 }}><summary>English Story</summary><div className="story-text">{s.story_en}</div></details></div>)}
     </section>
   );
