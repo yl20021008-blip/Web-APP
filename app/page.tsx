@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import StoryPanel from "./components/StoryPanel";
 
 type ApiResponse<T> = { ok: true; data: T } | { ok: false; error: string };
 type PageKey = "dashboard" | "flow" | "ielts" | "study" | "review" | "weak" | "summary" | "chapters" | "story" | "wordbook" | "admin";
@@ -147,7 +148,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v3.1.1 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
+          <p>v3.1.2 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -168,7 +169,7 @@ export default function Home() {
           {active === "weak" && <Study mode="weak" onMessage={setMessage} />}
           {active === "summary" && <DailySummary go={setActive} />}
           {active === "chapters" && <Chapters />}
-          {active === "story" && <Stories onMessage={setMessage} />}
+          {active === "story" && <StoryPanel />}
           {active === "wordbook" && <Wordbook />}
           {active === "admin" && <AdminPanel />}
           <div style={{ marginTop: 18 }}>
@@ -768,25 +769,6 @@ function Wordbook() {
       </div>
       <table className="table"><thead><tr><th>单词</th><th>释义</th><th>章节</th><th>状态</th></tr></thead><tbody>{rows.map((r) => <tr key={r.id}><td><strong>{r.word}</strong><br /><span style={{ color: "var(--muted)" }}>{r.part_of_speech}</span></td><td>{r.annotation}</td><td>{r.chapter}</td><td>{r.status} · L{r.mastery_level}</td></tr>)}</tbody></table>
       <div className="button-row" style={{ marginTop: 16 }}><button disabled={page <= 1} onClick={() => load(page - 1)}>上一页</button><button onClick={() => load(page + 1)}>下一页</button></div>
-    </section>
-  );
-}
-
-function Stories({ onMessage }: { onMessage: (m: string) => void }) {
-  const [stories, setStories] = useState<any[]>([]);
-  const [busy, setBusy] = useState(false);
-  async function load() { setStories(await api<any[]>("/api/stories")); }
-  useEffect(() => { load().catch(() => null); }, []);
-  async function generate() {
-    setBusy(true);
-    try { await api("/api/stories", { method: "POST", body: JSON.stringify({ size: 10 }) }); await load(); onMessage("故事已生成。"); }
-    catch (err) { onMessage(err instanceof Error ? err.message : "生成失败"); }
-    finally { setBusy(false); }
-  }
-  return (
-    <section className="grid">
-      <div className="card"><h2>AI故事记忆</h2><p style={{ color: "var(--muted)" }}>用5–10个已学词生成英文短篇故事、中文翻译和记忆提示。生成通常需要数十秒。</p><button className="primary" disabled={busy} onClick={generate}>{busy ? "正在生成…" : "生成一组故事"}</button></div>
-      {stories.map((s) => <div className="card" key={s.id}><h2>{s.title_zh}</h2><p style={{ color: "var(--muted)" }}>{s.title_en} · {s.word_count} words</p><div className="story-text">{s.story_zh}</div><details style={{ marginTop: 16 }}><summary>English Story</summary><div className="story-text">{s.story_en}</div></details></div>)}
     </section>
   );
 }

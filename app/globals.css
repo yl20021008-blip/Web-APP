@@ -609,3 +609,8 @@ button.ghost {
     font-size: 20px;
   }
 }
+
+.story-card { scroll-margin-top: 24px; }
+.story-card mark { background: #e3eed6; color: inherit; padding: 1px 3px; border-radius: 4px; font-weight: 700; }
+.story-meta { color: var(--muted); font-size: 13px; }
+.story-tip { border-left: 3px solid var(--primary, #6f847d); padding: 10px 14px; margin-top: 20px; }
