@@ -147,7 +147,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v3.0.2 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
+          <p>v3.1.1 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -779,13 +779,13 @@ function Stories({ onMessage }: { onMessage: (m: string) => void }) {
   useEffect(() => { load().catch(() => null); }, []);
   async function generate() {
     setBusy(true);
-    try { await api("/api/stories", { method: "POST", body: JSON.stringify({ size: 30 }) }); await load(); onMessage("故事已生成。"); }
+    try { await api("/api/stories", { method: "POST", body: JSON.stringify({ size: 10 }) }); await load(); onMessage("故事已生成。"); }
     catch (err) { onMessage(err instanceof Error ? err.message : "生成失败"); }
     finally { setBusy(false); }
   }
   return (
     <section className="grid">
-      <div className="card"><h2>故事记忆</h2><p style={{ color: "var(--muted)" }}>按已学词组合模板式中英记忆故事，帮助联想复习。</p><button className="primary" disabled={busy} onClick={generate}>{busy ? "正在生成…" : "生成一组故事"}</button></div>
+      <div className="card"><h2>AI故事记忆</h2><p style={{ color: "var(--muted)" }}>用5–10个已学词生成英文短篇故事、中文翻译和记忆提示。生成通常需要数十秒。</p><button className="primary" disabled={busy} onClick={generate}>{busy ? "正在生成…" : "生成一组故事"}</button></div>
       {stories.map((s) => <div className="card" key={s.id}><h2>{s.title_zh}</h2><p style={{ color: "var(--muted)" }}>{s.title_en} · {s.word_count} words</p><div className="story-text">{s.story_zh}</div><details style={{ marginTop: 16 }}><summary>English Story</summary><div className="story-text">{s.story_en}</div></details></div>)}
     </section>
   );

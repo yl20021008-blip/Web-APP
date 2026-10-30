@@ -1,59 +1,11 @@
 import { serviceFailure, ok, fail, readJson } from "@/app/api/_helpers";
 import { requireSession } from "@/lib/auth";
-import { query } from "@/lib/db";
+import { generateStory, StoryError } from "@/lib/story-ai";
+import { getPool, query } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function cleanMeaning(text: string | null): string {
-  if (!text) return "关键词";
-  return text.replace(/\s+/g, " ").slice(0, 28);
-}
-
-
-function buildStory(selected: Array<{ id: number; word: string; annotation: string | null }>) {
-  const scenes = [
-    "At the entrance of a quiet research library",
-    "Beside a large map covered with field notes",
-    "During a short seminar with other students",
-    "In a laboratory where data were being checked",
-    "On the way back, while summarising the argument",
-    "At night, when the memory route became clear"
-  ];
-
-  const zhScenes = [
-    "在一座安静的研究图书馆入口",
-    "在一张写满田野笔记的大地图旁",
-    "在一次和同学的小型研讨中",
-    "在一间正在核对数据的实验室里",
-    "回程路上，当我整理论证时",
-    "夜晚，当整条记忆路线变清晰时"
-  ];
-
-  const grouped: Array<Array<{ id: number; word: string; annotation: string | null }>> = [];
-  for (let i = 0; i < selected.length; i += 6) grouped.push(selected.slice(i, i + 6));
-
-  const storyEn = grouped.map((group, idx) => {
-    const words = group.map((w) => `**${w.word}**`).join(", ");
-    return `${scenes[idx % scenes.length]}, I connected ${words} into one scene so that each term had a clear place in my memory.`;
-  }).join("\n\n");
-
-  const storyZh = grouped.map((group, idx) => {
-    const words = group.map((w) => `**${w.word}**（${cleanMeaning(w.annotation)}）`).join("、");
-    return `${zhScenes[idx % zhScenes.length]}，我把 ${words} 串成一个场景，让每个词都在记忆中有一个明确位置。`;
-  }).join("\n\n");
-
-  const quiz = selected.slice(0, 8).map((w, idx) => `${idx + 1}. ${w.word} → ${cleanMeaning(w.annotation)}`).join("\n");
-
-  return {
-    titleEn: `A Research Memory Route with ${selected.length} Words`,
-    titleZh: `${selected.length}个词的科研场景记忆路线`,
-    storyEn: `${storyEn}\n\nQuick self-test:\n${quiz}`,
-    storyZh: `${storyZh}\n\n快速自测：\n${quiz}`,
-    memoryTip: "先按场景顺序复述故事，再遮住中文释义回忆每个英文词。"
-  };
-}
-
+export const maxDuration = 60;
 
 export async function GET() {
   try {
@@ -75,12 +27,20 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  let client: import("pg").PoolClient | undefined;
   try {
     const session = await requireSession();
     const body = await readJson<{ size?: number }>(request);
-    const size = Math.min(Math.max(Number(body.size || 30), 5), 30);
+    const size = Number(body.size ?? 10);
+    if (!Number.isInteger(size) || size < 5 || size > 10) return fail("每组请选择5至10个词。", 400);
+    client = await getPool().connect();
+    await client.query("BEGIN");
+    // Serialize generation per learner across server instances.
+    await client.query("SELECT id FROM users WHERE id = $1 FOR UPDATE NOWAIT", [session.userId]);
+    const recent = await client.query("SELECT COUNT(*)::int AS count FROM story_groups WHERE user_id = $1 AND created_at > NOW() - INTERVAL '1 day'", [session.userId]);
+    if (recent.rows[0].count >= 10) throw new StoryError("今天已生成10组故事，请明天再试。", 429);
 
-    const selected = await query<{ id: number; word: string; annotation: string | null }>(
+    const selected = await client.query<{ id: number; word: string; annotation: string | null }>(
       `
       SELECT w.id, w.word, w.annotation
       FROM learning_status ls
@@ -98,23 +58,23 @@ export async function POST(request: Request) {
     );
 
     if (selected.rows.length < 5) {
-      return fail("已学单词不足，至少需要5个已学词才能生成故事。", 400);
+      throw new StoryError("至少需要5个尚未用于故事的已学词，请先继续学习。", 400);
     }
 
-    const numberRow = await query<{ next_no: string }>(
+    const numberRow = await client.query<{ next_no: string }>(
       `SELECT COALESCE(MAX(group_number), 0) + 1 AS next_no FROM story_groups WHERE user_id = $1`,
       [session.userId]
     );
     const groupNumber = Number(numberRow.rows[0].next_no || 1);
-    const story = buildStory(selected.rows);
+    const story = await generateStory(selected.rows);
 
-    const inserted = await query<{ id: number }>(
+    const inserted = await client.query<{ id: number }>(
       `
       INSERT INTO story_groups(
         user_id, group_number, title_en, title_zh, story_en, story_zh,
         memory_tip, style, provider, word_count, created_at
       )
-      VALUES($1, $2, $3, $4, $5, $6, $7, 'web_memory_route', 'nextjs_local', $8, NOW())
+      VALUES($1, $2, $3, $4, $5, $6, $7, 'web_memory_route', 'ai_chat_completions', $8, NOW())
       RETURNING id
       `,
       [
@@ -133,7 +93,7 @@ export async function POST(request: Request) {
 
     for (let i = 0; i < selected.rows.length; i++) {
       const word = selected.rows[i];
-      await query(
+      await client.query(
         `
         INSERT INTO story_group_items(user_id, story_group_id, word_id, position, sentence_en, sentence_zh)
         VALUES($1, $2, $3, $4, $5, $6)
@@ -150,8 +110,14 @@ export async function POST(request: Request) {
       );
     }
 
+    await client.query("COMMIT");
     return ok({ id: storyGroupId, groupNumber, ...story, wordCount: selected.rows.length });
   } catch (err) {
-    return fail(err instanceof Error ? err.message : "生成故事失败", 400);
+    if (client) await client.query("ROLLBACK").catch(() => null);
+    if (err instanceof StoryError) return fail(err.message, err.status);
+    if (typeof err === "object" && err !== null && "code" in err && err.code === "55P03") return fail("已有故事正在生成，请稍后查看。", 409);
+    return serviceFailure(err);
+  } finally {
+    client?.release();
   }
 }
