@@ -148,7 +148,7 @@ export default function Home() {
       <header className="topbar">
         <div className="brand">
           <h1>IELTS Vocabulary Planner</h1>
-          <p>v3.2.0 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
+          <p>v3.2.1 雅思四技能词汇训练 · 服务诊断修复 · 认出 · 想起 · 听出 · 拼对 · 用出</p>
         </div>
         <div className="status-pill">
           {session ? `当前学习者：${session.displayName}` : loading ? "正在检查登录状态…" : "未登录"}
@@ -306,6 +306,7 @@ function LearningFlow({ onMessage, go }: { onMessage: (m: string) => void; go: (
   }
   return <section>
     <div className="card" style={{marginBottom:16}}><h2>今日学习</h2><p>复习5词 → 新学5词 → 阅读故事 → 回忆与表达。词汇回答会保存；流程位置和表达草稿仅保留在当前页面。</p><p role="status">{labels.map((label,i) => `${i === step ? "▶ " : i < step ? "✓ " : ""}${label}`).join(" / ")}</p></div>
+    {step === 0 && <div style={{marginBottom:12}}><button onClick={()=>setStep(1)}>先学新词，稍后再复习</button></div>}
     {step === 0 && <Study key="flow-review" mode="review" onMessage={onMessage} onComplete={collected}/>}
     {step === 1 && <Study key="flow-new" mode="new" onMessage={onMessage} onComplete={collected}/>}
     {step === 2 && (words.length >= 5 ? <StoryPanel wordIds={words.map(w=>w.id)} onContinue={()=>setStep(3)}/> : <div className="card"><p>本轮不足5个目标词，先跳过故事生成。</p><button onClick={()=>setStep(3)}>继续回忆</button></div>)}
@@ -332,14 +333,14 @@ function Study({ onMessage, mode, onComplete }: { onMessage: (m: string) => void
     setError("");
     try {
       const target = onComplete ? 5 : Number(localStorage.getItem(todayKey("daily_goal")) || 30);
-      const data = await api<WordTask[]>(`/api/study/today?mode=${mode}&target=${target}`);
+      const data = await api<WordTask[]>(`/api/study/today?mode=${mode}&target=${target}`, { signal: AbortSignal.timeout(20000) });
       setQueue(data);
       setIndex(0);
       setPhase(data.length ? "question" : "complete");
       setSavedResult(null);
       setStats({ answered: 0, forgot: 0, fuzzy: 0, correct: 0, mastered: 0, recycled: 0 });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "读取失败");
+      setError(err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError") ? "学习任务加载超过20秒。请重试；若持续失败，请检查数据库连接或Vercel运行日志。" : err instanceof Error ? err.message : "读取失败");
     } finally { setLoadingTasks(false); }
   }
 
@@ -415,7 +416,7 @@ function Study({ onMessage, mode, onComplete }: { onMessage: (m: string) => void
     else { setPhase("question"); setIndex(index + 1); }
   }
 
-  if (error) return <div className="notice error">{error}</div>;
+  if (error) return <section className="card"><div className="notice error" role="alert">{error}</div><div className="button-row" style={{marginTop:16}}><button className="primary" onClick={load}>重新加载单词</button>{onComplete && <button onClick={() => onComplete([])}>暂时跳过这一步</button>}</div></section>;
 
   if (loadingTasks) return <p role="status">正在准备学习任务…</p>;
 

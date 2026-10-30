@@ -73,10 +73,11 @@ export async function GET(request: Request) {
     const session = await requireSession();
     const url = new URL(request.url);
     const mode = String(url.searchParams.get("mode") || "today");
-    const newLimit = Math.min(Number(url.searchParams.get("newLimit") || 20), 80);
+    const newLimit = Math.min(Math.max(Number(url.searchParams.get("newLimit") || 20),1), 80);
     const reviewLimit = Math.min(Number(url.searchParams.get("reviewLimit") || 120), 240);
     const target = Math.min(Number(url.searchParams.get("target") || 30), 80);
 
+    if (![newLimit, reviewLimit, target].every(v => Number.isInteger(v) && v > 0)) return fail("学习数量参数无效。", 400);
     if (mode === "weak") {
       const weak = await query(
         `
@@ -103,7 +104,7 @@ export async function GET(request: Request) {
       return ok(weak.rows);
     }
 
-    const due = await query(
+    const due = mode === "new" ? { rows: [] } : await query(
       `
       SELECT ${WORD_COLUMNS}, 'review' AS task_type
       FROM learning_status ls
@@ -117,6 +118,8 @@ export async function GET(request: Request) {
       `,
       [session.userId, reviewLimit]
     );
+
+    if (mode === "review") return ok(due.rows.slice(0, target));
 
     const fresh = await query(
       `
@@ -158,7 +161,6 @@ export async function GET(request: Request) {
       return ok(interleaveSmart(due.rows, weak.rows, fresh.rows, target));
     }
 
-    if (mode === "review") return ok(due.rows.slice(0, target));
     if (mode === "new") return ok(fresh.rows.slice(0, target));
     return ok([...due.rows, ...fresh.rows]);
   } catch (err) {
